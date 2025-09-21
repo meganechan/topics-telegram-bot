@@ -12,6 +12,8 @@ import { TicketModule } from './modules/ticket/ticket.module';
 import { UsersModule } from './modules/users/users.module';
 import { GroupsModule } from './modules/groups/groups.module';
 import { TopicsModule } from './modules/topics/topics.module';
+import { AttachmentsModule } from './modules/attachments/attachments.module';
+import { MessagesModule } from './modules/messages/messages.module';
 
 @Module({
   imports: [
@@ -35,6 +37,8 @@ import { TopicsModule } from './modules/topics/topics.module';
     UsersModule,
     GroupsModule,
     TopicsModule,
+    AttachmentsModule,
+    MessagesModule,
   ],
 })
 export class AppModule {}

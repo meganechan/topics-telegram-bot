@@ -5,6 +5,11 @@ import { UsersService } from '../users/users.service';
 import { GroupsService } from '../groups/groups.service';
 import { TicketService } from '../ticket/ticket.service';
 import { TopicsService } from '../topics/topics.service';
+import { AttachmentsService } from '../attachments/attachments.service';
+import { MessagesService } from '../messages/messages.service';
+import * as fs from 'fs/promises';
+import * as https from 'https';
+import * as path from 'path';
 
 @Injectable()
 export class BotService implements OnModuleInit {
@@ -16,6 +21,8 @@ export class BotService implements OnModuleInit {
     private groupsService: GroupsService,
     private ticketService: TicketService,
     private topicsService: TopicsService,
+    private attachmentsService: AttachmentsService,
+    private messagesService: MessagesService,
   ) {
     const botToken = this.configService.get<string>('telegram.botToken');
     if (!botToken) {
@@ -806,7 +813,6 @@ export class BotService implements OnModuleInit {
     if (!user || !chat) return;
 
     try {
-
       // หา topic ในฐานข้อมูล
       const topic = await this.topicsService.findByTelegramTopicId(messageThreadId, chat.id.toString());
       if (!topic) return;
@@ -816,11 +822,11 @@ export class BotService implements OnModuleInit {
         await this.topicsService.addParticipant(messageThreadId, chat.id.toString(), user.id.toString());
       }
 
+      // บันทึกข้อความและ attachments ใน database (Phase 4 - Enhanced)
+      await this.processMessageWithMetadata(msg, topic);
+
       // Sync message to linked topics (Phase 3 feature)
       await this.syncMessageToLinkedTopics(msg, topic);
-
-      // บันทึกข้อความใน database (สำหรับ Phase 4)
-      console.log(`Message in topic ${messageThreadId}: ${message.text || 'non-text message'}`);
 
       // ตรวจสอบว่า topic เชื่อมโยงกับ ticket และยังเปิดอยู่หรือไม่
       if (topic.ticketId) {
@@ -840,6 +846,213 @@ export class BotService implements OnModuleInit {
     } catch (error) {
       console.error('Error handling topic message:', error);
     }
+  }
+
+  private async saveMessageToDatabase(msg: TelegramBot.Message, topic: any): Promise<void> {
+    try {
+      const messageType = this.messagesService.determineMessageType(msg);
+      const replyInfo = this.messagesService.extractReplyInfo(msg);
+      const forwardInfo = this.messagesService.extractForwardInfo(msg);
+
+      // Save message to database
+      const messageData = {
+        telegramMessageId: msg.message_id,
+        messageType,
+        text: msg.text,
+        caption: msg.caption,
+        senderId: msg.from?.id.toString(),
+        senderUsername: msg.from?.username,
+        senderFirstName: msg.from?.first_name,
+        senderLastName: msg.from?.last_name,
+        groupId: msg.chat?.id.toString(),
+        topicId: (msg as any).message_thread_id,
+        ticketId: topic.ticketId,
+        ...replyInfo,
+        ...forwardInfo,
+        hasAttachments: false,
+        attachmentIds: []
+      };
+
+      const savedMessage = await this.messagesService.saveMessage(messageData);
+
+      // Handle attachments if present
+      const attachmentIds = await this.handleMessageAttachments(msg, topic, (savedMessage as any)._id.toString());
+
+      if (attachmentIds.length > 0) {
+        await this.messagesService.updateAttachments((savedMessage as any)._id.toString(), attachmentIds);
+      }
+
+    } catch (error) {
+      console.error('Error saving message to database:', error);
+    }
+  }
+
+  private async handleMessageAttachments(msg: TelegramBot.Message, topic: any, messageId: string): Promise<string[]> {
+    const attachmentIds: string[] = [];
+
+    try {
+      // Handle different types of attachments
+      const attachmentPromises: Promise<string | null>[] = [];
+
+      // Photos
+      if (msg.photo && msg.photo.length > 0) {
+        const largestPhoto = msg.photo[msg.photo.length - 1]; // Get highest resolution
+        attachmentPromises.push(this.saveAttachmentInfo(largestPhoto, 'photo', msg, topic, messageId));
+      }
+
+      // Documents
+      if (msg.document) {
+        attachmentPromises.push(this.saveAttachmentInfo(msg.document, 'document', msg, topic, messageId));
+      }
+
+      // Video
+      if (msg.video) {
+        attachmentPromises.push(this.saveAttachmentInfo(msg.video, 'video', msg, topic, messageId));
+      }
+
+      // Audio
+      if (msg.audio) {
+        attachmentPromises.push(this.saveAttachmentInfo(msg.audio, 'audio', msg, topic, messageId));
+      }
+
+      // Voice
+      if (msg.voice) {
+        attachmentPromises.push(this.saveAttachmentInfo(msg.voice, 'voice', msg, topic, messageId));
+      }
+
+      // Video note
+      if (msg.video_note) {
+        attachmentPromises.push(this.saveAttachmentInfo(msg.video_note, 'video_note', msg, topic, messageId));
+      }
+
+      // Sticker
+      if (msg.sticker) {
+        attachmentPromises.push(this.saveAttachmentInfo(msg.sticker, 'sticker', msg, topic, messageId));
+      }
+
+      // Animation/GIF
+      if (msg.animation) {
+        attachmentPromises.push(this.saveAttachmentInfo(msg.animation, 'animation', msg, topic, messageId));
+      }
+
+      const results = await Promise.all(attachmentPromises);
+      attachmentIds.push(...results.filter(id => id !== null) as string[]);
+
+    } catch (error) {
+      console.error('Error handling message attachments:', error);
+    }
+
+    return attachmentIds;
+  }
+
+  private async saveAttachmentInfo(fileInfo: any, type: string, msg: TelegramBot.Message, topic: any, messageId: string): Promise<string | null> {
+    try {
+      // Validate file
+      const validation = this.attachmentsService.validateFile(fileInfo);
+      if (!validation.isValid) {
+        console.warn(`File validation failed: ${validation.reason}`);
+        // Send warning message to topic but don't block the message
+        await this.sendMessageToTopic(
+          msg.chat?.id.toString() || '',
+          (msg as any).message_thread_id,
+          `⚠️ **File Warning**\n\n${validation.reason}\n\nFile was not saved but message was delivered.`
+        );
+        return null;
+      }
+
+      const attachmentType = this.attachmentsService.determineAttachmentType({ [type]: fileInfo });
+
+      const attachmentData = {
+        telegramFileId: fileInfo.file_id,
+        fileName: fileInfo.file_name || `${type}_${Date.now()}`,
+        fileType: attachmentType,
+        mimeType: fileInfo.mime_type,
+        fileSize: fileInfo.file_size || 0,
+        width: fileInfo.width,
+        height: fileInfo.height,
+        duration: fileInfo.duration,
+        caption: msg.caption,
+        uploadedBy: msg.from?.id.toString(),
+        groupId: msg.chat?.id.toString(),
+        topicId: (msg as any).message_thread_id,
+        ticketId: topic.ticketId,
+        messageId: msg.message_id,
+        thumbnailFileId: fileInfo.thumb?.file_id
+      };
+
+      const savedAttachment = await this.attachmentsService.saveAttachment(attachmentData);
+
+      // Start download in background (Phase 4 feature)
+      this.downloadAttachmentInBackground(savedAttachment.telegramFileId);
+
+      return (savedAttachment as any)._id.toString();
+
+    } catch (error) {
+      console.error('Error saving attachment info:', error);
+      return null;
+    }
+  }
+
+  private async downloadAttachmentInBackground(telegramFileId: string): Promise<void> {
+    try {
+      const fileInfo = await this.bot.getFile(telegramFileId);
+      const fileUrl = `https://api.telegram.org/file/bot${this.configService.get('telegram.botToken')}/${fileInfo.file_path}`;
+
+      const attachment = await this.attachmentsService.findByFileId(telegramFileId);
+      if (!attachment) return;
+
+      const localFileName = this.attachmentsService.generateLocalFileName(attachment.fileName, telegramFileId);
+      const localFilePath = this.attachmentsService.getLocalFilePath(localFileName);
+
+      await this.downloadFileWithRetry(fileUrl, localFilePath, 3);
+      await this.attachmentsService.markAsDownloaded(telegramFileId, localFilePath);
+
+      console.log(`Downloaded attachment: ${localFileName}`);
+
+    } catch (error) {
+      console.error(`Error downloading attachment ${telegramFileId}:`, error);
+    }
+  }
+
+  private async downloadFileWithRetry(url: string, localPath: string, maxRetries: number = 3): Promise<void> {
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        await this.downloadFile(url, localPath);
+        return;
+      } catch (error) {
+        console.warn(`Download attempt ${attempt} failed:`, error.message);
+        if (attempt === maxRetries) {
+          throw error;
+        }
+        // Wait before retry (exponential backoff)
+        await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempt) * 1000));
+      }
+    }
+  }
+
+  private async downloadFile(url: string, localPath: string): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const file = require('fs').createWriteStream(localPath);
+      https.get(url, (response) => {
+        if (response.statusCode !== 200) {
+          reject(new Error(`HTTP ${response.statusCode}: ${response.statusMessage}`));
+          return;
+        }
+
+        response.pipe(file);
+
+        file.on('finish', () => {
+          file.close();
+          resolve();
+        });
+
+        file.on('error', (error) => {
+          require('fs').unlink(localPath, () => {}); // Delete the file on error
+          reject(error);
+        });
+
+      }).on('error', reject);
+    });
   }
 
 
@@ -1307,6 +1520,172 @@ export class BotService implements OnModuleInit {
     } catch (error) {
       console.error('Error handling inline reply from not found:', error);
       await this.bot.answerCallbackQuery(callbackQuery.id, { text: '❌ เกิดข้อผิดพลาด' });
+    }
+  }
+
+  // Phase 4: Attachment & Message Enhancement Features
+
+  async syncAttachmentsToLinkedTopics(fromTopicId: number, groupId: string): Promise<void> {
+    try {
+      // Get all linked topics for this topic
+      const sourceTopic = await this.topicsService.findByTelegramTopicId(fromTopicId, groupId);
+      if (!sourceTopic || !sourceTopic.linkedTopics || sourceTopic.linkedTopics.length === 0) {
+        return;
+      }
+
+      for (const linkedTopicId of sourceTopic.linkedTopics) {
+        await this.syncAttachmentsToTopic(fromTopicId, linkedTopicId, groupId);
+      }
+    } catch (error) {
+      console.error('Error syncing attachments to linked topics:', error);
+    }
+  }
+
+  private async syncAttachmentsToTopic(fromTopicId: number, toTopicId: number, groupId: string): Promise<void> {
+    try {
+      // Find unsyncable messages with attachments
+      const unsyncedMessages = await this.messagesService.findSyncableMessages(fromTopicId, toTopicId, groupId);
+
+      for (const message of unsyncedMessages) {
+        if (message.hasAttachments && message.attachmentIds.length > 0) {
+          await this.forwardMessageWithAttachments(message, toTopicId, groupId);
+        }
+      }
+    } catch (error) {
+      console.error(`Error syncing attachments from topic ${fromTopicId} to ${toTopicId}:`, error);
+    }
+  }
+
+  private async forwardMessageWithAttachments(message: any, toTopicId: number, groupId: string): Promise<void> {
+    try {
+      // Get attachment information
+      const attachments = await this.attachmentsService.findByMessageId(message.telegramMessageId, message.groupId, message.topicId);
+
+      if (attachments.length === 0) return;
+
+      // Create a summary message about the forwarded content
+      const senderInfo = message.senderFirstName + (message.senderLastName ? ` ${message.senderLastName}` : '');
+      const fromTopicInfo = await this.topicsService.findByTelegramTopicId(message.topicId, groupId);
+
+      let messageText = `📎 Synced from ${fromTopicInfo?.name || 'Unknown Topic'}\n`;
+      messageText += `👤 From: ${senderInfo}${message.senderUsername ? ` (@${message.senderUsername})` : ''}\n`;
+
+      if (message.text || message.caption) {
+        messageText += `💬 ${message.text || message.caption}\n`;
+      }
+
+      messageText += `📁 Attachments: ${attachments.length} file(s)`;
+
+      // Send the sync message to the target topic
+      await this.sendMessageToTopic(groupId, toTopicId, messageText);
+
+      // Mark message as synced
+      await this.messagesService.markAsSynced((message as any)._id.toString(), toTopicId);
+
+    } catch (error) {
+      console.error('Error forwarding message with attachments:', error);
+    }
+  }
+
+  async generateMessageMetadata(msg: TelegramBot.Message): Promise<any> {
+    const metadata: any = {
+      messageLength: (msg.text || msg.caption || '').length,
+      hasMedia: false,
+      mediaTypes: [],
+      hasReply: !!msg.reply_to_message,
+      hasForward: !!(msg.forward_from || msg.forward_from_chat),
+      mentions: [],
+      hashtags: [],
+      urls: [],
+      timestamp: new Date(msg.date * 1000)
+    };
+
+    // Check for media types
+    if (msg.photo) {
+      metadata.hasMedia = true;
+      metadata.mediaTypes.push('photo');
+    }
+    if (msg.document) {
+      metadata.hasMedia = true;
+      metadata.mediaTypes.push('document');
+    }
+    if (msg.video) {
+      metadata.hasMedia = true;
+      metadata.mediaTypes.push('video');
+    }
+    if (msg.audio) {
+      metadata.hasMedia = true;
+      metadata.mediaTypes.push('audio');
+    }
+    if (msg.voice) {
+      metadata.hasMedia = true;
+      metadata.mediaTypes.push('voice');
+    }
+    if (msg.sticker) {
+      metadata.hasMedia = true;
+      metadata.mediaTypes.push('sticker');
+    }
+    if (msg.animation) {
+      metadata.hasMedia = true;
+      metadata.mediaTypes.push('animation');
+    }
+    if (msg.video_note) {
+      metadata.hasMedia = true;
+      metadata.mediaTypes.push('video_note');
+    }
+
+    // Extract mentions, hashtags, and URLs from text
+    const text = msg.text || msg.caption || '';
+
+    // Extract mentions
+    const mentionRegex = /@(\w+)/g;
+    let match: RegExpExecArray | null;
+    while ((match = mentionRegex.exec(text)) !== null) {
+      metadata.mentions.push(match[1]);
+    }
+
+    // Extract hashtags
+    const hashtagRegex = /#(\w+)/g;
+    while ((match = hashtagRegex.exec(text)) !== null) {
+      metadata.hashtags.push(match[1]);
+    }
+
+    // Extract URLs
+    const urlRegex = /(https?:\/\/[^\s]+)/g;
+    while ((match = urlRegex.exec(text)) !== null) {
+      metadata.urls.push(match[1]);
+    }
+
+    return metadata;
+  }
+
+  // Enhanced message processing with metadata
+  private async processMessageWithMetadata(msg: TelegramBot.Message, topic: any): Promise<void> {
+    try {
+      // Generate enhanced metadata
+      const metadata = await this.generateMessageMetadata(msg);
+
+      // Save message with enhanced metadata
+      await this.saveMessageToDatabase(msg, topic);
+
+      // If message has attachments, sync to linked topics
+      if (metadata.hasMedia && topic.linkedTopics && topic.linkedTopics.length > 0) {
+        // Delay sync to ensure message is saved first
+        setTimeout(() => {
+          this.syncAttachmentsToLinkedTopics(msg.message_thread_id as number, msg.chat?.id.toString() || '');
+        }, 1000);
+      }
+
+      console.log(`Processed message with metadata:`, {
+        messageId: msg.message_id,
+        mediaTypes: metadata.mediaTypes,
+        mentions: metadata.mentions.length,
+        hashtags: metadata.hashtags.length,
+        urls: metadata.urls.length
+      });
+
+    } catch (error) {
+      console.error('Error processing message with metadata:', error);
     }
   }
 }
