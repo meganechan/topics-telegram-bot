@@ -159,8 +159,6 @@ export class BotService implements OnModuleInit {
 
       if (data === 'mention_action:show_users') {
         await this.showUserSelectionMenu(message, messageThreadId, chat.id.toString());
-      } else if (data === 'mention_action:inline_reply') {
-        await this.handleInlineReplyRequest(callbackQuery, messageThreadId, chat.id.toString());
       }
 
     } catch (error) {
@@ -169,77 +167,7 @@ export class BotService implements OnModuleInit {
     }
   }
 
-  private async handleInlineReplyRequest(callbackQuery: TelegramBot.CallbackQuery, messageThreadId: number, groupId: string) {
-    try {
-      const user = callbackQuery.from;
-      const chat = callbackQuery.message?.chat;
 
-      if (!user || !chat) {
-        await this.bot.answerCallbackQuery(callbackQuery.id, { text: '❌ ข้อมูลไม่ครบถ้วน' });
-        return;
-      }
-
-      // หา topic และ ticket
-      const topic = await this.topicsService.findByTelegramTopicId(messageThreadId, groupId);
-      if (!topic || !topic.ticketId) {
-        await this.bot.answerCallbackQuery(callbackQuery.id, { text: '❌ ไม่พบ Ticket ที่เชื่อมโยงกับ Topic นี้' });
-        return;
-      }
-
-      const ticket = await this.ticketService.findByTicketId(topic.ticketId);
-      if (!ticket) {
-        await this.bot.answerCallbackQuery(callbackQuery.id, { text: '❌ ไม่พบข้อมูล Ticket' });
-        return;
-      }
-
-      // ส่งข้อความ inline reply
-      const inlineReplyMessage =
-        `💬 **Inline Reply จาก ${user.first_name}**\n\n` +
-        `📋 กรุณาพิมพ์ข้อความถัดไปเพื่อส่งเป็น Inline Reply\n` +
-        `🎫 Ticket: ${ticket.ticketId}\n` +
-        `📝 หัวข้อ: ${ticket.title}\n\n` +
-        `💡 ข้อความถัดไปจะถูกส่งเป็น Inline Reply ใน Topic นี้`;
-
-      await this.sendMessageToTopic(
-        chat.id.toString(),
-        messageThreadId,
-        inlineReplyMessage
-      );
-
-      await this.bot.answerCallbackQuery(callbackQuery.id, { text: '✅ กรุณาพิมพ์ข้อความถัดไป' });
-
-      // Set flag for next message to be inline reply
-      this.setPendingInlineReply(user.id.toString(), messageThreadId, groupId);
-
-    } catch (error) {
-      console.error('Error handling inline reply request:', error);
-      await this.bot.answerCallbackQuery(callbackQuery.id, { text: '❌ เกิดข้อผิดพลาด' });
-    }
-  }
-
-  private pendingInlineReplies = new Map<string, { messageThreadId: number; groupId: string; timestamp: number }>();
-
-  private setPendingInlineReply(userId: string, messageThreadId: number, groupId: string) {
-    this.pendingInlineReplies.set(userId, {
-      messageThreadId,
-      groupId,
-      timestamp: Date.now()
-    });
-
-    // Auto cleanup after 5 minutes
-    setTimeout(() => {
-      this.pendingInlineReplies.delete(userId);
-    }, 5 * 60 * 1000);
-  }
-
-  private getPendingInlineReply(userId: string): { messageThreadId: number; groupId: string } | null {
-    const pending = this.pendingInlineReplies.get(userId);
-    if (pending && Date.now() - pending.timestamp < 5 * 60 * 1000) { // 5 minutes timeout
-      return pending;
-    }
-    this.pendingInlineReplies.delete(userId);
-    return null;
-  }
 
   private async handleUnlinkCallback(callbackQuery: TelegramBot.CallbackQuery, data: string) {
     try {
@@ -723,16 +651,12 @@ export class BotService implements OnModuleInit {
 
   private async showMentionOptions(msg: TelegramBot.Message, messageThreadId: number, groupId: string) {
     try {
-      // แสดงตัวเลือกระหว่าง mention user หรือ inline reply
+      // แสดงตัวเลือกสำหรับ mention user เท่านั้น
       const buttons = [
         [
           {
             text: '👥 เชิญผู้ใช้',
             callback_data: 'mention_action:show_users'
-          },
-          {
-            text: '💬 Inline Reply',
-            callback_data: 'mention_action:inline_reply'
           }
         ],
         [
@@ -749,8 +673,7 @@ export class BotService implements OnModuleInit {
         groupId,
         messageThreadId,
         '🎯 เลือกการกระทำ:\n\n' +
-          '👥 เชิญผู้ใช้ - เชิญ Internal User เข้าร่วม Topic\n' +
-          '💬 Inline Reply - ส่งข้อความใน Topic นี้',
+          '👥 เชิญผู้ใช้ - เชิญ Internal User เข้าร่วม Topic',
         { reply_markup: inlineKeyboard }
       );
 
@@ -883,12 +806,6 @@ export class BotService implements OnModuleInit {
     if (!user || !chat) return;
 
     try {
-      // ตรวจสอบว่าเป็น inline reply ที่รอการส่งหรือไม่
-      const pendingReply = this.getPendingInlineReply(user.id.toString());
-      if (pendingReply && pendingReply.messageThreadId === messageThreadId && pendingReply.groupId === chat.id.toString()) {
-        await this.handleInlineReplyMessage(msg, messageThreadId, chat.id.toString());
-        return;
-      }
 
       // หา topic ในฐานข้อมูล
       const topic = await this.topicsService.findByTelegramTopicId(messageThreadId, chat.id.toString());
@@ -925,64 +842,6 @@ export class BotService implements OnModuleInit {
     }
   }
 
-  private async handleInlineReplyMessage(msg: TelegramBot.Message, messageThreadId: number, groupId: string) {
-    try {
-      const user = msg.from;
-      const messageText = msg.text;
-
-      if (!user || !messageText) {
-        return;
-      }
-
-      // Remove pending inline reply
-      this.pendingInlineReplies.delete(user.id.toString());
-
-      // Get topic and ticket info
-      const topic = await this.topicsService.findByTelegramTopicId(messageThreadId, groupId);
-      if (!topic || !topic.ticketId) {
-        return;
-      }
-
-      const ticket = await this.ticketService.findByTicketId(topic.ticketId);
-      if (!ticket) {
-        return;
-      }
-
-      // Send inline reply message
-      const inlineReplyMessage =
-        `💬 **Inline Reply**\n\n` +
-        `📝 ${messageText}\n\n` +
-        `👤 จาก: ${user.first_name || user.username || 'ผู้ใช้'}\n` +
-        `🎫 Ticket: ${ticket.ticketId}\n` +
-        `📅 ${new Date().toLocaleString('th-TH')}`;
-
-      await this.sendMessageToTopic(
-        groupId,
-        messageThreadId,
-        inlineReplyMessage
-      );
-
-      // Sync to linked topics
-      const linkedTopics = await this.topicsService.getLinkedTopics(messageThreadId, groupId);
-      for (const linkedTopicId of linkedTopics) {
-        try {
-          const syncMessage =
-            `🔗 **Synced Inline Reply**\n\n` +
-            `📝 ${messageText}\n\n` +
-            `👤 จาก: ${user.first_name || user.username || 'ผู้ใช้'} (Topic อื่น)\n` +
-            `🎫 Ticket: ${ticket.ticketId}\n` +
-            `📅 ${new Date().toLocaleString('th-TH')}`;
-
-          await this.sendMessageToTopic(groupId, linkedTopicId, syncMessage);
-        } catch (error) {
-          console.error(`Error syncing inline reply to topic ${linkedTopicId}:`, error);
-        }
-      }
-
-    } catch (error) {
-      console.error('Error handling inline reply message:', error);
-    }
-  }
 
   private async syncMessageToLinkedTopics(msg: TelegramBot.Message, sourceTopic: any) {
     try {
@@ -1443,7 +1302,7 @@ export class BotService implements OnModuleInit {
       const messageThreadId = context.messageThreadId;
       const groupId = context.groupId;
 
-      await this.handleInlineReplyRequest(callbackQuery, messageThreadId, groupId);
+      // Inline reply functionality has been removed
 
     } catch (error) {
       console.error('Error handling inline reply from not found:', error);
