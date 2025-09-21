@@ -27,7 +27,35 @@ export class UsersService {
   }
 
   async findByUsername(username: string): Promise<User | null> {
-    return this.userModel.findOne({ username }).exec();
+    return this.userModel.findOne({
+      $or: [
+        { username },
+        { externalUsername: username }
+      ],
+      isBot: false // Only find real users, not bots
+    }).exec();
+  }
+
+  async searchUsersByUsername(searchTerm: string, limit: number = 10): Promise<User[]> {
+    const regex = new RegExp(searchTerm, 'i'); // Case insensitive search
+    return this.userModel
+      .find({
+        $or: [
+          { username: regex },
+          { externalUsername: regex },
+          { firstName: regex },
+          { lastName: regex }
+        ],
+        isBot: false // Only find real users, not bots
+      })
+      .select('telegramId username externalUsername firstName lastName')
+      .limit(limit)
+      .exec();
+  }
+
+  async validateInternalUser(username: string): Promise<boolean> {
+    const user = await this.findByUsername(username);
+    return user !== null && !user.isBot;
   }
 
   async findAllActiveUsers(excludeTelegramIds: string[] = []): Promise<User[]> {

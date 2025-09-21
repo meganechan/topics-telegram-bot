@@ -275,6 +275,7 @@ tests/unit/user-management/
 │   ├── services/
 │   │   ├── user-registration.domain-service.spec.ts
 │   │   ├── internal-user-lookup.domain-service.spec.ts
+│   │   ├── inline-reply.domain-service.spec.ts
 │   │   └── group-management.domain-service.spec.ts
 │   └── value-objects/
 │       ├── telegram-user-id.value-object.spec.ts
@@ -282,7 +283,8 @@ tests/unit/user-management/
 └── application/
     └── handlers/
         ├── register-user.handler.spec.ts
-        └── mention-user.handler.spec.ts
+        ├── mention-user.handler.spec.ts
+        └── inline-reply.handler.spec.ts
 ```
 
 ### 2.4 Integration Context Unit Tests

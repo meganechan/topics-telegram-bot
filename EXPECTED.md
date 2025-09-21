@@ -83,13 +83,15 @@ src/
 
 ---
 
-## Phase 3: External User Integration
+## Phase 3: Internal User Integration
 ### Expected Deliverables:
 
-#### 1. External User System
-- `/mention <username>` command
-- External user topic creation
+#### 1. Internal User System
+- `/mention <username>` command for internal users from database only
+- Internal user lookup from system database
+- Internal user topic creation using system data
 - User state management across topics
+- Inline reply when mention without user specification
 
 #### 2. Topic Linking System
 - Topic-to-topic relationship mapping
@@ -103,7 +105,8 @@ src/
 - Sync status tracking
 
 ### Success Criteria:
-- ✅ `/mention` creates external user topic
+- ✅ `/mention` creates internal user topic
+- ✅ Inline reply works when mention without user
 - ✅ Topics link successfully
 - ✅ Messages sync in real-time
 - ✅ Both sides can communicate seamlessly
@@ -212,7 +215,7 @@ POST /api/v1/tickets/:id/mention  - Mention user
 
 ### Core Features:
 1. **Ticket Management**: Create, update, close tickets via Telegram commands
-2. **External User Integration**: Mention users from external systems
+2. **Internal User Integration**: Mention internal users with inline reply support
 3. **Real-time Sync**: Bidirectional message synchronization
 4. **File Handling**: Complete attachment support
 5. **REST API**: Full programmatic access

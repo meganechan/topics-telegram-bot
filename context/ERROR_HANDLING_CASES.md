@@ -140,9 +140,75 @@ async checkStorageBeforeDownload(fileSize: number): Promise<void> {
 }
 ```
 
-## 2. Forwarded Message Error Scenarios
+## 2. Mention และ Reply Error Scenarios
 
-### 2.1 Circular Forward Detection
+### 2.1 Invalid User Mention
+
+**เคส: Mention ผู้ใช้ที่ไม่ได้อยู่ในระบบ**
+```typescript
+export class InvalidUserMentionError extends Error {
+  constructor(username: string) {
+    super(`User ${username} not found in internal system`);
+    this.name = 'InvalidUserMentionError';
+  }
+}
+
+async handleInvalidUserMention(error: InvalidUserMentionError, messageInfo: any): Promise<void> {
+  const errorMessage = `❌ **ไม่พบผู้ใช้ในระบบ**
+
+👤 ผู้ใช้: @${error.username}
+⚠️ ไม่สามารถ mention ผู้ใช้ภายนอกได้
+
+💡 **วิธีแก้ไข:**
+• ตรวจสอบชื่อผู้ใช้อีกครั้ง
+• ใช้ inline reply แทน
+• ติดต่อผู้ดูแลเพื่อเพิ่มผู้ใช้
+
+👤 ส่งโดย: ${messageInfo.senderName}
+⏰ ${new Date().toLocaleString('th-TH')}`;
+
+  await this.sendErrorMessage(messageInfo.groupId, messageInfo.toTopicId, errorMessage);
+}
+```
+
+### 2.2 Inline Reply Fallback
+
+**เคส: การใช้ inline reply เมื่อไม่ระบุ user**
+```typescript
+async handleInlineReply(messageText: string, messageInfo: any): Promise<void> {
+  // แยกข้อความที่ต้องการ reply
+  const mentionPattern = /@(\w+)/g;
+  const mentions = messageText.match(mentionPattern);
+
+  if (!mentions || mentions.length === 0) {
+    // ไม่มี mention ให้ใช้ inline reply
+    const replyMessage = `💬 **Inline Reply**
+
+📝 ${messageText}
+
+👤 จาก: ${messageInfo.senderName}
+📍 Topic: ${messageInfo.topicTitle}
+⏰ ${new Date().toLocaleString('th-TH')}`;
+
+    await this.sendInlineReply(messageInfo.groupId, messageInfo.toTopicId, replyMessage);
+    return;
+  }
+
+  // มี mention ให้ตรวจสอบผู้ใช้
+  for (const mention of mentions) {
+    const username = mention.substring(1); // ตัด @ ออก
+    const user = await this.findInternalUser(username);
+
+    if (!user) {
+      throw new InvalidUserMentionError(username);
+    }
+  }
+}
+```
+
+## 3. Forwarded Message Error Scenarios
+
+### 3.1 Circular Forward Detection
 
 **เคส: การ forward ข้อความวนลูป**
 ```typescript
@@ -177,7 +243,7 @@ async detectCircularForward(messageId: number, fromTopic: number, toTopic: numbe
 }
 ```
 
-### 2.2 Missing Forward Source
+### 3.2 Missing Forward Source
 
 **เคส: ไม่สามารถหาต้นทางของ forward ได้**
 ```typescript
@@ -206,9 +272,9 @@ async handleMissingForwardSource(error: MissingForwardSourceError, messageInfo: 
 }
 ```
 
-## 3. Topic Management Errors
+## 4. Topic Management Errors
 
-### 3.1 Topic Creation Limits
+### 4.1 Topic Creation Limits
 
 **เคส: เกินขีดจำกัดจำนวน Topics**
 ```typescript
@@ -233,7 +299,7 @@ async checkTopicLimit(groupId: string): Promise<void> {
 }
 ```
 
-### 3.2 Topic Permission Errors
+### 4.2 Topic Permission Errors
 
 **เคส: Bot ไม่มีสิทธิ์จัดการ Topics**
 ```typescript
@@ -257,9 +323,9 @@ async validateTopicPermissions(groupId: string, action: string): Promise<void> {
 }
 ```
 
-## 4. Message Sync Errors
+## 5. Message Sync Errors
 
-### 4.1 Rate Limiting
+### 5.1 Rate Limiting
 
 **เคส: ส่งข้อความเร็วเกินไป**
 ```typescript
@@ -303,7 +369,7 @@ async sendMessageWithRateLimit(
 }
 ```
 
-### 4.2 Message Too Long
+### 5.2 Message Too Long
 
 **เคส: ข้อความยาวเกินขีดจำกัด**
 ```typescript
@@ -382,9 +448,9 @@ private splitMessage(text: string, maxLength: number): string[] {
 }
 ```
 
-## 5. Database และ Concurrency Errors
+## 6. Database และ Concurrency Errors
 
-### 5.1 Duplicate Message Handling
+### 6.1 Duplicate Message Handling
 
 **เคส: ข้อความซ้ำซ้อน**
 ```typescript
@@ -421,7 +487,7 @@ async saveMess ageToDatabase(messageData: any): Promise<void> {
 }
 ```
 
-### 5.2 Concurrent Topic Creation
+### 6.2 Concurrent Topic Creation
 
 **เคส: การสร้าง Topic พร้อมกัน**
 ```typescript
@@ -462,7 +528,7 @@ async createTopicSafely(
 }
 ```
 
-## 6. Comprehensive Error Reporting
+## 7. Comprehensive Error Reporting
 
 ```typescript
 @Injectable()

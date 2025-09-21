@@ -46,24 +46,31 @@
 
 ---
 
-## Phase 3: Internal User Mention System (1.5 สัปดาห์)
+## Phase 3: Internal User Integration (1.5 สัปดาห์)
 ### ⏳ สถานะ: รอดำเนินการ
 
 #### Tasks:
-- [ ] Implement `/mention` command for internal users
-- [ ] Add user lookup by username functionality
+- [ ] Implement `/mention` command for internal users from database only
+- [ ] Add user lookup by username from system database
+- [ ] Implement database user validation for mentions
 - [ ] Implement topic participant management
-- [ ] Add mention validation for existing users
+- [ ] Add mention validation for existing database users
 - [ ] Create user invitation notifications
 - [ ] Handle participant state management
 - [ ] Add mention activity logging
+- [ ] Implement inline reply for mention without user specification
+- [ ] Add topic linking system
+- [ ] Implement message synchronization between topics
 
 #### Deliverables:
-- [ ] `/mention` command for internal users only
-- [ ] User lookup and validation system
+- [ ] `/mention` command for internal database users only
+- [ ] Database user lookup and validation system
 - [ ] Topic participant management
 - [ ] Mention notification system
 - [ ] User invitation workflow
+- [ ] Inline reply when mention without user
+- [ ] Topic linking functionality
+- [ ] Real-time message synchronization
 
 ---
 
@@ -144,7 +151,7 @@
 ## Timeline Overview:
 - **Phase 1**: 2 weeks (Core Infrastructure)
 - **Phase 2**: 1.5 weeks (Basic Tickets)
-- **Phase 3**: 2 weeks (External Users)
+- **Phase 3**: 1.5 weeks (Internal Users)
 - **Phase 4**: 1.5 weeks (Attachments)
 - **Phase 5**: 2 weeks (REST API)
 - **Phase 6**: 1.5 weeks (Hooks & Monitoring)
