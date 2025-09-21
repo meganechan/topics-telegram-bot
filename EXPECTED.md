@@ -24,7 +24,7 @@ src/
 #### 2. Package Dependencies
 - **Core**: `@nestjs/core`, `@nestjs/common`, `@nestjs/platform-express`
 - **Database**: `@nestjs/mongoose`, `mongoose`
-- **Telegram**: `telegraf`, `@nestjs/telegraf`
+- **Telegram**: `node-telegram-bot-api`, `@types/node-telegram-bot-api`
 - **Validation**: `class-validator`, `class-transformer`
 - **Config**: `@nestjs/config`
 - **Dev**: `typescript`, `ts-node`, `nodemon`
@@ -221,7 +221,7 @@ POST /api/v1/tickets/:id/mention  - Mention user
 ### Technical Specifications:
 - **Backend**: NestJS + TypeScript
 - **Database**: MongoDB with Mongoose
-- **Bot Framework**: Telegraf
+- **Bot Framework**: node-telegram-bot-api
 - **API**: RESTful with OpenAPI documentation
 - **Container**: Docker/Podman ready
 - **Security**: API key authentication, rate limiting

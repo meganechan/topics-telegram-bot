@@ -26,6 +26,26 @@ export class UsersService {
     return user;
   }
 
+  async findByUsername(username: string): Promise<User | null> {
+    return this.userModel.findOne({ username }).exec();
+  }
+
+  async findAllActiveUsers(excludeTelegramIds: string[] = []): Promise<User[]> {
+    const query: any = {
+      isBot: false
+    };
+
+    if (excludeTelegramIds.length > 0) {
+      query.telegramId = { $nin: excludeTelegramIds };
+    }
+
+    return this.userModel
+      .find(query)
+      .select('telegramId username firstName lastName')
+      .limit(20)
+      .exec();
+  }
+
   async updateUser(telegramId: string, updateData: Partial<User>): Promise<User> {
     return this.userModel
       .findOneAndUpdate({ telegramId }, updateData, { new: true })

@@ -101,7 +101,6 @@ topics-telegram-bot/
 {
   telegramId: string,           // Telegram User ID
   username: string,             // Telegram Username
-  externalUsername?: string,    // Username จากระบบอื่น (สำหรับ mention)
   firstName?: string,
   lastName?: string,
   isBot: boolean,
@@ -300,7 +299,7 @@ Telegram Groups/Topics
 - `/start` - เริ่มใช้งาน Bot
 - `/create_ticket <title> [description]` - สร้าง Ticket ใหม่
 - `/close_ticket` - ปิด Ticket (ใช้ใน Topic)
-- `/mention @username` - สร้าง Topic สำหรับ user ที่ถูก mention
+- `/mention @username` - เชิญ user ที่มีอยู่ในระบบเข้าร่วม Topic
 - `/link_topic <topic_id>` - เชื่อมโยง Topic กับอีก Topic
 - `/unlink_topic <topic_id>` - ยกเลิกการเชื่อมโยง
 
@@ -331,8 +330,8 @@ Telegram Groups/Topics
 2. **Create Ticket**:
    - ทาง Telegram: ใช้คำสั่ง `/create_ticket` -> ระบบสร้าง Topic ใหม่
    - ทาง API: `POST /api/v1/tickets` -> ระบบสร้าง Topic และ trigger hooks
-3. **Mention User**: ใน Topic ใช้คำสั่ง `/mention @external_user` -> สร้าง Topic ใหม่สำหรับ user นั้น
-4. **Message Sync**: ข้อความใน Topic ที่เชื่อมโยงกันจะ sync กันทั้งสองฝั่ง และ trigger hooks
+3. **Mention User**: ใน Topic ใช้คำสั่ง `/mention @username` -> เชิญ user ที่มีอยู่ในระบบเข้าร่วม Topic
+4. **Topic Conversation**: ผู้ใช้ทุกคนสนทนากันใน Topic เดียวกัน
 5. **Hook Integration**: ระบบจะ trigger webhooks เมื่อมี events เกิดขึ้น
 6. **API Integration**: ระบบภายนอกสามารถสร้าง tickets, ส่งข้อความ ผ่าน REST API
 7. **Close Ticket**: ใช้คำสั่ง `/close_ticket` หรือ API เพื่อปิด Topic และ Ticket

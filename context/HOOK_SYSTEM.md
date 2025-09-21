@@ -184,8 +184,8 @@ interface UserMentionedPayload {
   timestamp: string;
   data: {
     mentionedUser: {
-      externalUsername: string;
-      telegramId?: string;
+      username: string;
+      telegramId: string;
     };
     mentionedBy: {
       telegramId: string;
@@ -195,11 +195,7 @@ interface UserMentionedPayload {
       ticketId: string;
       title: string;
     };
-    newTopic: {
-      telegramTopicId: number;
-      name: string;
-    };
-    originalTopic: {
+    topic: {
       telegramTopicId: number;
       name: string;
     };
@@ -513,7 +509,7 @@ export class MessageService {
   }
 
   async handleUserMention(mentionData: any): Promise<void> {
-    const newTopic = await this.createTopicForMention(mentionData);
+    await this.addUserToTopic(mentionData);
 
     // Trigger hook
     await this.hooksService.triggerHooks(
@@ -523,16 +519,12 @@ export class MessageService {
         timestamp: new Date().toISOString(),
         data: {
           mentionedUser: {
-            externalUsername: mentionData.externalUsername,
+            username: mentionData.username,
             telegramId: mentionData.telegramId
           },
           mentionedBy: await this.getUserInfo(mentionData.mentionedBy),
           ticket: await this.getTicketInfo(mentionData.ticketId),
-          newTopic: {
-            telegramTopicId: newTopic.telegramTopicId,
-            name: newTopic.name
-          },
-          originalTopic: await this.getTopicInfo(mentionData.originalTopicId)
+          topic: await this.getTopicInfo(mentionData.topicId)
         }
       },
       mentionData.groupId

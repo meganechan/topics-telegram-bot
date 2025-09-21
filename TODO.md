@@ -46,24 +46,24 @@
 
 ---
 
-## Phase 3: External User Integration (2 สัปดาห์)
+## Phase 3: Internal User Mention System (1.5 สัปดาห์)
 ### ⏳ สถานะ: รอดำเนินการ
 
 #### Tasks:
-- [ ] Implement `/mention` command
-- [ ] Create external user management
-- [ ] Implement topic linking system
-- [ ] Create message synchronization logic
-- [ ] Add real-time message forwarding
-- [ ] Handle user state management
-- [ ] Add linked topic validation
+- [ ] Implement `/mention` command for internal users
+- [ ] Add user lookup by username functionality
+- [ ] Implement topic participant management
+- [ ] Add mention validation for existing users
+- [ ] Create user invitation notifications
+- [ ] Handle participant state management
+- [ ] Add mention activity logging
 
 #### Deliverables:
-- [ ] `/mention` command for external users
-- [ ] Topic linking functionality
-- [ ] Real-time message sync between linked topics
-- [ ] External user topic creation
-- [ ] Bidirectional message forwarding
+- [ ] `/mention` command for internal users only
+- [ ] User lookup and validation system
+- [ ] Topic participant management
+- [ ] Mention notification system
+- [ ] User invitation workflow
 
 ---
 

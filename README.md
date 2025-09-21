@@ -15,7 +15,7 @@
 
 - **Backend**: NestJS + TypeScript
 - **Database**: MongoDB
-- **Bot Framework**: Telegraf
+- **Bot Framework**: node-telegram-bot-api
 - **Container**: Docker/Podman
 
 ## Installation
@@ -81,7 +81,15 @@ Edit `.env` file:
 ```env
 # Telegram Bot
 TELEGRAM_BOT_TOKEN=your_bot_token_here
+
+# Webhook Configuration (choose one: webhook OR polling)
+# For webhook mode (recommended for production)
+TELEGRAM_USE_WEBHOOK=true
 TELEGRAM_WEBHOOK_URL=https://yourdomain.com/webhook/telegram
+
+# For polling mode (good for development)
+# TELEGRAM_USE_WEBHOOK=false
+# TELEGRAM_POLLING=true
 
 # Database
 MONGODB_URI=mongodb://localhost:27017/topics-telegram-bot
@@ -90,7 +98,24 @@ MONGODB_URI=mongodb://localhost:27017/topics-telegram-bot
 NODE_ENV=development
 PORT=3000
 API_KEY_SECRET=your_secret_key
+
+# Optional: Custom webhook path
+# TELEGRAM_WEBHOOK_PATH=/webhook/telegram
 ```
+
+### Webhook vs Polling
+
+**Webhook Mode (Production)**
+- Uses single HTTP server (NestJS)
+- Better performance and resource usage
+- Requires HTTPS domain
+- Set `TELEGRAM_USE_WEBHOOK=true`
+
+**Polling Mode (Development)**
+- Creates separate HTTP connection
+- Good for local development
+- No domain required
+- Set `TELEGRAM_USE_WEBHOOK=false`
 
 ## Usage
 
@@ -99,7 +124,7 @@ API_KEY_SECRET=your_secret_key
 - `/start` - เริ่มใช้งาน Bot
 - `/create_ticket <title> [description]` - สร้าง Ticket ใหม่
 - `/close_ticket` - ปิด Ticket (ใช้ใน Topic)
-- `/mention @username` - เชิญ External User
+- `/mention @username` - เชิญ User ที่มีอยู่ในระบบ
 
 ### Setup Bot in Group
 

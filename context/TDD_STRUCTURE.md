@@ -179,7 +179,7 @@ tests/unit/communication/
 │       └── telegram-message.handler.spec.ts
 └── infrastructure/
     ├── external/
-    │   ├── telegram-bot.adapter.spec.ts
+    │   ├── telegram-api.adapter.spec.ts
     │   └── telegram-api.client.spec.ts
     └── repositories/
         ├── message.repository.spec.ts
@@ -271,14 +271,14 @@ tests/unit/user-management/
 │   ├── entities/
 │   │   ├── user.entity.spec.ts
 │   │   ├── group.entity.spec.ts
-│   │   └── external-user.entity.spec.ts
+│   │   └── user-mention.entity.spec.ts
 │   ├── services/
 │   │   ├── user-registration.domain-service.spec.ts
-│   │   ├── external-user-mapping.domain-service.spec.ts
+│   │   ├── internal-user-lookup.domain-service.spec.ts
 │   │   └── group-management.domain-service.spec.ts
 │   └── value-objects/
 │       ├── telegram-user-id.value-object.spec.ts
-│       └── external-username.value-object.spec.ts
+│       └── internal-username.value-object.spec.ts
 └── application/
     └── handlers/
         ├── register-user.handler.spec.ts
