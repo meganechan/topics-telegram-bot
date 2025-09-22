@@ -23,6 +23,9 @@ export class Topic {
   @Prop({ type: [String], default: [] })
   participants: string[]; // Array of User Telegram IDs
 
+  @Prop()
+  createdBy?: string; // User Telegram ID who created this topic
+
   @Prop({ default: true })
   isActive: boolean;
 }

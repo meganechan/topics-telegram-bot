@@ -32,19 +32,50 @@ export class TopicsService {
     topicId2: number,
     groupId: string,
   ): Promise<void> {
+    // สำหรับ cross-group support: ต้องหา topic แต่ละตัวใน group ที่ถูกต้อง
+    console.log(`[${new Date().toISOString()}] 🔗 LINKING TOPICS: ${topicId1} ↔ ${topicId2}`);
+
+    // ค้นหา topic1 ใน group ที่ระบุ
+    let topic1 = await this.findByTelegramTopicId(topicId1, groupId);
+    if (!topic1) {
+      // ถ้าไม่เจอ ให้ค้นหา globally
+      const allTopic1 = await this.findByTelegramTopicIdGlobal(topicId1);
+      topic1 = allTopic1[0];
+    }
+
+    // ค้นหา topic2 ใน group ที่ระบุ
+    let topic2 = await this.findByTelegramTopicId(topicId2, groupId);
+    if (!topic2) {
+      // ถ้าไม่เจอ ให้ค้นหา globally
+      const allTopic2 = await this.findByTelegramTopicIdGlobal(topicId2);
+      topic2 = allTopic2[0];
+    }
+
+    if (!topic1 || !topic2) {
+      console.error(`[${new Date().toISOString()}] ❌ Cannot link topics: topic1=${!!topic1}, topic2=${!!topic2}`);
+      return;
+    }
+
+    console.log(`  - Topic1: ${topicId1} in group ${topic1.groupId}`);
+    console.log(`  - Topic2: ${topicId2} in group ${topic2.groupId}`);
+
+    // อัพเดต topic1 ให้ link ไป topic2
     await this.topicModel
       .updateOne(
-        { telegramTopicId: topicId1, groupId },
+        { telegramTopicId: topicId1, groupId: topic1.groupId },
         { $addToSet: { linkedTopics: topicId2 } },
       )
       .exec();
 
+    // อัพเดต topic2 ให้ link ไป topic1
     await this.topicModel
       .updateOne(
-        { telegramTopicId: topicId2, groupId },
+        { telegramTopicId: topicId2, groupId: topic2.groupId },
         { $addToSet: { linkedTopics: topicId1 } },
       )
       .exec();
+
+    console.log(`  ✅ Topics linked successfully`);
   }
 
   async unlinkTopics(
@@ -52,19 +83,50 @@ export class TopicsService {
     topicId2: number,
     groupId: string,
   ): Promise<void> {
+    // สำหรับ cross-group support: ต้องหา topic แต่ละตัวใน group ที่ถูกต้อง
+    console.log(`[${new Date().toISOString()}] 🔗 UNLINKING TOPICS: ${topicId1} ↮ ${topicId2}`);
+
+    // ค้นหา topic1 ใน group ที่ระบุ
+    let topic1 = await this.findByTelegramTopicId(topicId1, groupId);
+    if (!topic1) {
+      // ถ้าไม่เจอ ให้ค้นหา globally
+      const allTopic1 = await this.findByTelegramTopicIdGlobal(topicId1);
+      topic1 = allTopic1[0];
+    }
+
+    // ค้นหา topic2 ใน group ที่ระบุ
+    let topic2 = await this.findByTelegramTopicId(topicId2, groupId);
+    if (!topic2) {
+      // ถ้าไม่เจอ ให้ค้นหา globally
+      const allTopic2 = await this.findByTelegramTopicIdGlobal(topicId2);
+      topic2 = allTopic2[0];
+    }
+
+    if (!topic1 || !topic2) {
+      console.error(`[${new Date().toISOString()}] ❌ Cannot unlink topics: topic1=${!!topic1}, topic2=${!!topic2}`);
+      return;
+    }
+
+    console.log(`  - Topic1: ${topicId1} in group ${topic1.groupId}`);
+    console.log(`  - Topic2: ${topicId2} in group ${topic2.groupId}`);
+
+    // ลบ link จาก topic1 ไป topic2
     await this.topicModel
       .updateOne(
-        { telegramTopicId: topicId1, groupId },
+        { telegramTopicId: topicId1, groupId: topic1.groupId },
         { $pull: { linkedTopics: topicId2 } },
       )
       .exec();
 
+    // ลบ link จาก topic2 ไป topic1
     await this.topicModel
       .updateOne(
-        { telegramTopicId: topicId2, groupId },
+        { telegramTopicId: topicId2, groupId: topic2.groupId },
         { $pull: { linkedTopics: topicId1 } },
       )
       .exec();
+
+    console.log(`  ✅ Topics unlinked successfully`);
   }
 
   async getLinkedTopics(
@@ -100,5 +162,30 @@ export class TopicsService {
         { new: true },
       )
       .exec();
+  }
+
+  async findByTelegramTopicIdGlobal(telegramTopicId: number): Promise<Topic[]> {
+    return this.topicModel
+      .find({ telegramTopicId })
+      .exec();
+  }
+
+  async removeBrokenLink(
+    sourceTopicId: number,
+    brokenLinkId: number,
+    groupId: string,
+  ): Promise<void> {
+    try {
+      await this.topicModel
+        .updateOne(
+          { telegramTopicId: sourceTopicId, groupId },
+          { $pull: { linkedTopics: brokenLinkId } }
+        )
+        .exec();
+
+      console.log(`[${new Date().toISOString()}] 🧹 Removed broken link ${brokenLinkId} from topic ${sourceTopicId}`);
+    } catch (error) {
+      console.error(`[${new Date().toISOString()}] ❌ Error removing broken link:`, error);
+    }
   }
 }

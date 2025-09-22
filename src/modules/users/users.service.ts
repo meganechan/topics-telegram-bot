@@ -79,4 +79,13 @@ export class UsersService {
       .findOneAndUpdate({ telegramId }, updateData, { new: true })
       .exec();
   }
+
+  async pairUserWithGroup(telegramId: string, groupId: string): Promise<User> {
+    return this.updateUser(telegramId, { defaultGroupId: groupId });
+  }
+
+  async getUserDefaultGroup(telegramId: string): Promise<string | null> {
+    const user = await this.findByTelegramId(telegramId);
+    return user?.defaultGroupId || null;
+  }
 }

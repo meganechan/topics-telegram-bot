@@ -25,6 +25,9 @@ export class User {
 
   @Prop()
   languageCode?: string;
+
+  @Prop()
+  defaultGroupId?: string; // กลุ่มหลักที่ user pair ไว้
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);

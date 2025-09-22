@@ -36,7 +36,21 @@ export class BotService implements OnModuleInit {
     console.log('Telegram bot started successfully');
   }
 
+  private logApiCall(method: string, params?: string): void {
+    console.log(`[${new Date().toISOString()}] API Call: ${method}${params ? ` - ${params}` : ''}`);
+  }
+
+  private logApiResponse(method: string, duration: number, result?: any): void {
+    const resultInfo = result ? ` - ${JSON.stringify(result).substring(0, 100)}${JSON.stringify(result).length > 100 ? '...' : ''}` : '';
+    console.log(`[${new Date().toISOString()}] API Response: ${method} - Duration: ${duration}ms${resultInfo}`);
+  }
+
+  private logApiError(method: string, error: any): void {
+    console.error(`[${new Date().toISOString()}] API Error: ${method} -`, error);
+  }
+
   async createForumTopic(chatId: string, name: string, iconColor?: number, iconCustomEmojiId?: string) {
+    const startTime = Date.now();
     try {
       const apiParams: any = {
         chat_id: chatId,
@@ -51,18 +65,77 @@ export class BotService implements OnModuleInit {
         apiParams.icon_custom_emoji_id = iconCustomEmojiId;
       }
 
+      console.log(`[${new Date().toISOString()}] API Call: createForumTopic - chatId: ${chatId}, name: ${name}`);
+
+      // เช็ค bot permissions ก่อนสร้าง topic
+      try {
+        const chat = await this.bot.getChat(chatId);
+        console.log(`[${new Date().toISOString()}] Target chat info:`, {
+          id: chat.id,
+          type: chat.type,
+          title: chat.title,
+          is_forum: (chat as any).is_forum
+        });
+
+        const botMember = await this.bot.getChatMember(chatId, (await this.bot.getMe()).id);
+        console.log(`[${new Date().toISOString()}] Bot permissions:`, {
+          status: botMember.status,
+          can_manage_topics: (botMember as any).can_manage_topics,
+          can_delete_messages: (botMember as any).can_delete_messages,
+          can_restrict_members: (botMember as any).can_restrict_members
+        });
+
+        if (chat.type !== 'supergroup') {
+          throw new Error(`Cannot create topics in chat type: ${chat.type}`);
+        }
+
+        if (!(chat as any).is_forum) {
+          //throw new Error('Target chat does not support forum topics');
+        }
+
+        if (botMember.status !== 'administrator') {
+          throw new Error(`Bot status: ${botMember.status} - requires administrator privileges`);
+        }
+
+      } catch (permError) {
+        console.error(`[${new Date().toISOString()}] Permission check failed:`, permError);
+        throw permError;
+      }
+
       // Note: createForumTopic might not be available in node-telegram-bot-api
       // Use the _request method to make a raw API call
       const result = await (this.bot as any)._request('createForumTopic', { form: apiParams });
-      return result;
+
+      const duration = Date.now() - startTime;
+      console.log(`[${new Date().toISOString()}] API Response: createForumTopic - Duration: ${duration}ms, Success: true`);
+      console.log(`[${new Date().toISOString()}] Topic created - ID: ${result.message_thread_id}`);
+
+      return {
+        success: true,
+        message_thread_id: result.message_thread_id
+      };
     } catch (error) {
-      console.error('Error creating forum topic:', error);
-      throw error;
+      const duration = Date.now() - startTime;
+      console.error(`[${new Date().toISOString()}] API Error: createForumTopic - Duration: ${duration}ms`);
+      console.error(`[${new Date().toISOString()}] Error details:`, {
+        message: error.message,
+        code: error.code,
+        response: error.response?.body || error.response
+      });
+
+      return {
+        success: false,
+        error: error.message || 'Unknown error',
+        message_thread_id: null
+      };
     }
   }
 
   async closeForumTopic(chatId: string, messageThreadId: number) {
     try {
+      console.log(`[${new Date().toISOString()}] API Call: closeForumTopic - chatId: ${chatId}, messageThreadId: ${messageThreadId}`);
+      const startTime = Date.now();
+
       // Note: closeForumTopic might not be available in node-telegram-bot-api
       const result = await (this.bot as any)._request('closeForumTopic', { 
         form: {
@@ -70,9 +143,13 @@ export class BotService implements OnModuleInit {
           message_thread_id: messageThreadId,
         }
       });
+
+      const duration = Date.now() - startTime;
+      console.log(`[${new Date().toISOString()}] API Response: closeForumTopic - Duration: ${duration}ms, Success: ${!!result.ok}`);
+      
       return result;
     } catch (error) {
-      console.error('Error closing forum topic:', error);
+      console.error(`[${new Date().toISOString()}] API Error: closeForumTopic -`, error);
       throw error;
     }
   }
@@ -87,21 +164,32 @@ export class BotService implements OnModuleInit {
       // Explicitly remove parse_mode to avoid markdown parsing issues
       delete sendOptions.parse_mode;
 
+      console.log(`[${new Date().toISOString()}] API Call: sendMessage - chatId: ${chatId}, messageThreadId: ${messageThreadId}`);
       console.log('Debug sendOptions before sending:', JSON.stringify(sendOptions, null, 2));
-      console.log('Debug text content:', text);
+      console.log('Debug text content type:', typeof text, 'length:', text.length, 'preview:', text.substring(0, 100) + (text.length > 100 ? '...' : ''));
 
+      const startTime = Date.now();
       const result = await this.bot.sendMessage(chatId, text, sendOptions);
+      const duration = Date.now() - startTime;
+
+      console.log(`[${new Date().toISOString()}] API Response: sendMessage - Duration: ${duration}ms, MessageId: ${result.message_id}`);
+      
       return result;
     } catch (error) {
-      console.error('Error sending message to topic:', error);
+      console.error(`[${new Date().toISOString()}] API Error: sendMessage -`, error);
       throw error;
     }
   }
 
   async checkBotPermissions(chatId: string): Promise<{ isAdmin: boolean; canManageTopics: boolean }> {
     try {
+      console.log(`[${new Date().toISOString()}] API Call: getMe & getChatMember - chatId: ${chatId}`);
+      const startTime = Date.now();
+
       const me = await this.bot.getMe();
       const botInfo = await this.bot.getChatMember(chatId, me.id);
+      
+      const duration = Date.now() - startTime;
       const isAdmin = botInfo.status === 'administrator';
 
       let canManageTopics = false;
@@ -109,9 +197,11 @@ export class BotService implements OnModuleInit {
         canManageTopics = (botInfo as any).can_manage_topics === true;
       }
 
+      console.log(`[${new Date().toISOString()}] API Response: checkBotPermissions - Duration: ${duration}ms, isAdmin: ${isAdmin}, canManageTopics: ${canManageTopics}`);
+
       return { isAdmin, canManageTopics };
     } catch (error) {
-      console.error('Error checking bot permissions:', error);
+      console.error(`[${new Date().toISOString()}] API Error: checkBotPermissions -`, error);
       return { isAdmin: false, canManageTopics: false };
     }
   }
@@ -278,22 +368,84 @@ export class BotService implements OnModuleInit {
         return;
       }
 
-      // Add user as participant
+      // หา group ที่ User B pair ไว้
+      const userBGroupId = await this.usersService.getUserDefaultGroup(targetUser.telegramId);
+      const targetGroupId = userBGroupId || chat.id.toString(); // fallback ไปกลุ่มปัจจุบันถ้าไม่ได้ pair
+
+      // สร้าง topic ใหม่สำหรับ user ที่ถูก mention ในกลุ่มที่เขา pair ไว้
+      const newTopicName = `👤 ${targetUser.firstName || username} - ${ticket.ticketId}`;
+      const newTopicResult = await this.createForumTopic(
+        targetGroupId,
+        newTopicName,
+        0x6FB9F0 // Light blue color
+      );
+
+      if (!newTopicResult.success) {
+        await this.bot.answerCallbackQuery(callbackQuery.id, { text: `❌ ไม่สามารถสร้าง Topic สำหรับ @${username} ได้` });
+        return;
+      }
+
+      // บันทึก topic ใหม่ในฐานข้อมูล (สร้างโดย user ที่ถูก mention)
+      const newTopic = await this.topicsService.createTopic({
+        telegramTopicId: newTopicResult.message_thread_id,
+        groupId: targetGroupId, // แก้ไข Critical Bug: ใช้ targetGroupId แทน chat.id
+        name: newTopicName,
+        ticketId: ticket.ticketId,
+        participants: [targetUser.telegramId, user.id.toString()],
+        linkedTopics: [messageThreadId], // เชื่อมโยงกับ topic เดิม
+        createdBy: targetUser.telegramId // สร้างโดย user ที่ถูก mention (userB)
+      });
+
+      // Debug logging (Topic Saved)
+      console.log(`[${new Date().toISOString()}] 💾 TOPIC SAVED:`);
+      console.log(`  - Telegram topicId: ${newTopicResult.message_thread_id}`);
+      console.log(`  - Database groupId: ${targetGroupId}`);
+      console.log(`  - Linked to original topic: ${messageThreadId}`);
+
+      // เชื่อมโยง topic เดิมกับ topic ใหม่
+      await this.topicsService.linkTopics(messageThreadId, newTopicResult.message_thread_id, targetGroupId);
+
+      // เพิ่ม user เป็น participant ใน topic เดิมด้วย
       await this.topicsService.addParticipant(messageThreadId, chat.id.toString(), targetUser.telegramId);
 
-      // Send mention message in topic
-      const mentionMessage =
-        `✅ เชิญ @${username} เข้าร่วม Ticket แล้ว\n` +
+      // ส่งข้อความแจ้งใน topic เดิม
+      const originalTopicMessage =
+        `✅ สร้าง Topic สำหรับ @${username} แล้ว\n` +
         `🎫 Ticket: ${ticket.ticketId}\n` +
         `📝 หัวข้อ: ${ticket.title}\n` +
-        `👤 เชิญโดย: ${user.first_name}\n\n` +
-        `💬 @${username} สามารถสนทนาใน Topic นี้ได้แล้ว`;
+        `👤 เชิญโดย: ${user.first_name}\n` +
+        `🔗 Topic ของ @${username}: "${newTopicName}"\n\n` +
+        `💬 ข้อความจะถูก sync ระหว่าง topics อัตโนมัติ`;
 
       await this.sendMessageToTopic(
         chat.id.toString(),
         messageThreadId,
-        mentionMessage
+        originalTopicMessage
       );
+
+
+      // ส่งข้อความแจ้งใน topic ใหม่
+      const initialMessage =
+        `🎯 **${targetUser.firstName || username}** ได้รับการเชิญเข้าร่วม Ticket\n\n` +
+        `🎫 Ticket: ${ticket.ticketId}\n` +
+        `📝 หัวข้อ: ${ticket.title}\n` +
+        `👤 เชิญโดย: ${user.first_name}\n\n` +
+        `💬 นี่คือพื้นที่สนทนาส่วนตัวสำหรับ ${targetUser.firstName || username}\n` +
+        `🔗 ข้อความจะถูก sync กับ Topic หลักอัตโนมัติ\n\n` +
+        `📞 @${username} กรุณาส่งข้อความเพื่อเริ่มการสนทนา`;
+
+      await this.sendMessageToTopic(
+        chat.id.toString(),
+        newTopicResult.message_thread_id,
+        initialMessage
+      );
+
+      // ส่งการแจ้งเตือนให้ user ที่ถูก mention (ถ้าเป็นไปได้)
+      try {
+        await this.notifyMentionedUser(targetUser, ticket, newTopicResult.message_thread_id, chat.id.toString(), user.first_name);
+      } catch (error) {
+        console.log(`Could not send direct notification to user ${username}:`, error.message);
+      }
 
       await this.bot.answerCallbackQuery(callbackQuery.id, { text: `✅ เชิญ ${username} สำเร็จ` });
 
@@ -327,7 +479,10 @@ export class BotService implements OnModuleInit {
       );
     } else {
       const user = msg.from;
-      if (user) {
+      const chat = msg.chat;
+
+      if (user && chat) {
+        // สร้างหรือค้นหา user
         await this.usersService.findOrCreateUser({
           telegramId: user.id.toString(),
           username: user.username || user.first_name || 'Unknown',
@@ -336,12 +491,22 @@ export class BotService implements OnModuleInit {
           isBot: user.is_bot,
           languageCode: user.language_code,
         });
-      }
 
-      await this.bot.sendMessage(msg.chat.id,
-        '✅ Bot พร้อมใช้งานในกลุ่มนี้แล้ว!\n\n' +
-          '🎫 ใช้ /create_ticket <หัวข้อ> [รายละเอียด] เพื่อสร้าง ticket'
-      );
+        // Pair user กับกลุ่มปัจจุบัน
+        await this.usersService.pairUserWithGroup(user.id.toString(), chat.id.toString());
+
+        await this.bot.sendMessage(msg.chat.id,
+          `✅ Bot พร้อมใช้งานในกลุ่มนี้แล้ว!\n\n` +
+          `👤 ${user.first_name} ได้ถูก pair กับกลุ่มนี้เรียบร้อยแล้ว\n` +
+          `🎫 ใช้ /create_ticket <หัวข้อ> [รายละเอียด] เพื่อสร้าง ticket\n` +
+          `🔗 เมื่อมีคนเรียกคุณ topic จะถูกสร้างในกลุ่มนี้`
+        );
+      } else {
+        await this.bot.sendMessage(msg.chat.id,
+          '✅ Bot พร้อมใช้งานในกลุ่มนี้แล้ว!\n\n' +
+            '🎫 ใช้ /create_ticket <หัวข้อ> [รายละเอียด] เพื่อสร้าง ticket'
+        );
+      }
     }
   }
 
@@ -423,7 +588,7 @@ export class BotService implements OnModuleInit {
         title,
         description,
         createdBy: user.id.toString(),
-        groupId: chat.id.toString(),
+        groupId: chat.id.toString(), // ใช้กลุ่มปัจจุบันสำหรับ ticket
       });
 
       // สร้าง forum topic
@@ -438,7 +603,7 @@ export class BotService implements OnModuleInit {
         await this.topicsService.createTopic({
           telegramTopicId: topicResult.message_thread_id,
           name: topicName,
-          groupId: chat.id.toString(),
+          groupId: chat.id.toString(), // ใช้กลุ่มปัจจุบันสำหรับ createTicket topic
           ticketId: ticket.ticketId,
           participants: [user.id.toString()],
         });
@@ -633,22 +798,91 @@ export class BotService implements OnModuleInit {
         return;
       }
 
-      // เพิ่ม user เป็น participant
+      // หา group ที่ User B pair ไว้
+      const userBGroupId = await this.usersService.getUserDefaultGroup(targetUser.telegramId);
+      const targetGroupId = userBGroupId || chat.id.toString(); // fallback ไปกลุ่มปัจจุบันถ้าไม่ได้ pair
+
+      // Debug logging (Mention Command)
+      console.log(`[${new Date().toISOString()}] 🔍 MENTION DEBUG (CMD):`);
+      console.log(`  - Original chatId: ${chat.id.toString()}`);
+      console.log(`  - User paired groupId: ${userBGroupId}`);
+      console.log(`  - Target groupId: ${targetGroupId}`);
+      console.log(`  - Username: ${targetUsername}`);
+
+      // สร้าง topic ใหม่สำหรับ user ที่ถูก mention ในกลุ่มที่เขา pair ไว้
+      const newTopicName = `👤 ${targetUser.firstName || targetUsername} - ${ticket.ticketId}`;
+      const newTopicResult = await this.createForumTopic(
+        targetGroupId,
+        newTopicName,
+        0x6FB9F0 // Light blue color
+      );
+
+      if (!newTopicResult.success) {
+        await this.bot.sendMessage(msg.chat.id, `❌ ไม่สามารถสร้าง Topic สำหรับ @${targetUsername} ได้`);
+        return;
+      }
+
+      // บันทึก topic ใหม่ในฐานข้อมูล (สร้างโดย user ที่ถูก mention)
+      const newTopic = await this.topicsService.createTopic({
+        telegramTopicId: newTopicResult.message_thread_id,
+        groupId: targetGroupId, // แก้ไข Critical Bug: ใช้ targetGroupId แทน chat.id
+        name: newTopicName,
+        ticketId: ticket.ticketId,
+        participants: [targetUser.telegramId, user.id.toString()],
+        linkedTopics: [messageThreadId], // เชื่อมโยงกับ topic เดิม
+        createdBy: targetUser.telegramId // สร้างโดย user ที่ถูก mention (userB)
+      });
+
+      // Debug logging (Topic Saved)
+      console.log(`[${new Date().toISOString()}] 💾 TOPIC SAVED:`);
+      console.log(`  - Telegram topicId: ${newTopicResult.message_thread_id}`);
+      console.log(`  - Database groupId: ${targetGroupId}`);
+      console.log(`  - Linked to original topic: ${messageThreadId}`);
+
+      // เชื่อมโยง topic เดิมกับ topic ใหม่
+      await this.topicsService.linkTopics(messageThreadId, newTopicResult.message_thread_id, targetGroupId);
+
+      // เพิ่ม user เป็น participant ใน topic เดิมด้วย
       await this.topicsService.addParticipant(messageThreadId, chat.id.toString(), targetUser.telegramId);
 
-      // ส่งข้อความแจ้งใน topic
-      const mentionMessage =
-        `✅ เชิญ @${targetUsername} เข้าร่วม Ticket แล้ว\n` +
+      // ส่งข้อความแจ้งใน topic เดิม
+      const originalTopicMessage =
+        `✅ สร้าง Topic สำหรับ @${targetUsername} แล้ว\n` +
         `🎫 Ticket: ${ticket.ticketId}\n` +
         `📝 หัวข้อ: ${ticket.title}\n` +
-        `👤 เชิญโดย: ${user.first_name}\n\n` +
-        `💬 @${targetUsername} สามารถสนทนาใน Topic นี้ได้แล้ว`;
+        `👤 เชิญโดย: ${user.first_name}\n` +
+        `🔗 Topic ของ @${targetUsername}: "${newTopicName}"\n\n` +
+        `💬 ข้อความจะถูก sync ระหว่าง topics อัตโนมัติ`;
 
       await this.sendMessageToTopic(
         chat.id.toString(),
         messageThreadId,
-        mentionMessage
+        originalTopicMessage
       );
+
+
+      // ส่งข้อความแจ้งใน topic ใหม่
+      const initialMessage =
+        `🎯 **${targetUser.firstName || targetUsername}** ได้รับการเชิญเข้าร่วม Ticket\n\n` +
+        `🎫 Ticket: ${ticket.ticketId}\n` +
+        `📝 หัวข้อ: ${ticket.title}\n` +
+        `👤 เชิญโดย: ${user.first_name}\n\n` +
+        `💬 นี่คือพื้นที่สนทนาส่วนตัวสำหรับ ${targetUser.firstName || targetUsername}\n` +
+        `🔗 ข้อความจะถูก sync กับ Topic หลักอัตโนมัติ\n\n` +
+        `📞 @${targetUsername} กรุณาส่งข้อความเพื่อเริ่มการสนทนา`;
+
+      await this.sendMessageToTopic(
+        chat.id.toString(),
+        newTopicResult.message_thread_id,
+        initialMessage
+      );
+
+      // ส่งการแจ้งเตือนให้ user ที่ถูก mention (ถ้าเป็นไปได้)
+      try {
+        await this.notifyMentionedUser(targetUser, ticket, newTopicResult.message_thread_id, chat.id.toString(), user.first_name);
+      } catch (error) {
+        console.log(`Could not send direct notification to user ${targetUsername}:`, error.message);
+      }
 
     } catch (error) {
       console.error('Error handling mention:', error);
@@ -764,7 +998,14 @@ export class BotService implements OnModuleInit {
     const chat = update.chat;
 
     if (update?.new_chat_member?.user?.id) {
+      console.log(`[${new Date().toISOString()}] API Call: getMe (chat member update)`);
+      const startTime = Date.now();
+      
       const me = await this.bot.getMe();
+      const duration = Date.now() - startTime;
+      
+      console.log(`[${new Date().toISOString()}] API Response: getMe - Duration: ${duration}ms, botId: ${me.id}`);
+      
       if (update.new_chat_member.user.id === me.id) {
         const status = update.new_chat_member.status;
         const isAdmin = status === 'administrator';
@@ -785,6 +1026,21 @@ export class BotService implements OnModuleInit {
   private async handleMessage(msg: TelegramBot.Message) {
     const message = msg;
     const user = msg.from;
+
+    // 📥 Log incoming message
+    const messageThreadId = (message as any)?.message_thread_id;
+    const chatType = msg.chat?.type || 'unknown';
+    const messageText = msg.text?.substring(0, 100) + (msg.text && msg.text.length > 100 ? '...' : '');
+    const userName = user?.username || user?.first_name || 'Unknown';
+    const hasAttachment = !!(msg.photo || msg.document || msg.video || msg.audio || msg.voice || msg.sticker);
+
+    console.log(`[${new Date().toISOString()}] 📥 INCOMING MESSAGE:`);
+    console.log(`  - Chat: ${msg.chat?.id} (${chatType})`);
+    console.log(`  - User: ${userName} (${user?.id})`);
+    console.log(`  - Topic: ${messageThreadId || 'N/A'}`);
+    console.log(`  - Text: "${messageText || '[No text]'}"`);
+    console.log(`  - Has attachment: ${hasAttachment}`);
+    console.log(`  - Message ID: ${msg.message_id}`);
 
     if (user && msg.chat?.type !== 'private') {
       // สร้างหรืออัพเดท user ในฐานข้อมูล
@@ -813,13 +1069,41 @@ export class BotService implements OnModuleInit {
     if (!user || !chat) return;
 
     try {
-      // หา topic ในฐานข้อมูล
-      const topic = await this.topicsService.findByTelegramTopicId(messageThreadId, chat.id.toString());
-      if (!topic) return;
+      console.log(`[${new Date().toISOString()}] 🔍 TOPIC LOOKUP:`);
+      console.log(`  - Looking for topicId: ${messageThreadId} in group: ${chat.id.toString()}`);
 
-      // เพิ่ม user เป็น participant ใน topic (ถ้ายังไม่มี)
+      // หา topic ในฐานข้อมูล - รองรับ cross-group
+      let topic = await this.topicsService.findByTelegramTopicId(messageThreadId, chat.id.toString());
+
+      if (topic) {
+        console.log(`  ✅ Found topic in current group: ${topic.name || 'Unnamed'}`);
+      } else {
+        console.log(`  ❌ Topic not found in current group, searching globally...`);
+
+        // ถ้าไม่เจอใน group ปัจจุบัน ให้ค้นหาใน group อื่น (cross-group support)
+        const allTopics = await this.topicsService.findByTelegramTopicIdGlobal(messageThreadId);
+        console.log(`  📊 Found ${allTopics.length} topics globally with ID ${messageThreadId}`);
+
+        topic = allTopics.find(t => t.groupId === chat.id.toString());
+
+        if (!topic && allTopics.length > 0) {
+          // ใช้ topic แรกที่เจอ (สำหรับ cross-group sync)
+          topic = allTopics[0];
+          console.log(`  🔄 Cross-group message detected: topic in group ${topic.groupId}, message from group ${chat.id.toString()}`);
+        }
+      }
+
+      if (!topic) {
+        console.log(`  ⚠️ No topic found anywhere - skipping message processing`);
+        return;
+      }
+
+      console.log(`  ✅ Processing message in topic: ${topic.name || 'Unnamed'} (${topic.groupId})`);
+      console.log(`  🔗 Topic has ${topic.linkedTopics?.length || 0} linked topics`);
+
+      // เพิ่ม user เป็น participant ใน topic (ถ้ายังไม่มี) - ใช้ topic.groupId สำหรับ cross-group support
       if (!topic.participants.includes(user.id.toString())) {
-        await this.topicsService.addParticipant(messageThreadId, chat.id.toString(), user.id.toString());
+        await this.topicsService.addParticipant(messageThreadId, topic.groupId, user.id.toString());
       }
 
       // บันทึกข้อความและ attachments ใน database (Phase 4 - Enhanced)
@@ -995,7 +1279,14 @@ export class BotService implements OnModuleInit {
 
   private async downloadAttachmentInBackground(telegramFileId: string): Promise<void> {
     try {
+      console.log(`[${new Date().toISOString()}] API Call: getFile - fileId: ${telegramFileId}`);
+      const startTime = Date.now();
+      
       const fileInfo = await this.bot.getFile(telegramFileId);
+      const duration = Date.now() - startTime;
+      
+      console.log(`[${new Date().toISOString()}] API Response: getFile - Duration: ${duration}ms, filePath: ${fileInfo.file_path}`);
+      
       const fileUrl = `https://api.telegram.org/file/bot${this.configService.get('telegram.botToken')}/${fileInfo.file_path}`;
 
       const attachment = await this.attachmentsService.findByFileId(telegramFileId);
@@ -1010,7 +1301,7 @@ export class BotService implements OnModuleInit {
       console.log(`Downloaded attachment: ${localFileName}`);
 
     } catch (error) {
-      console.error(`Error downloading attachment ${telegramFileId}:`, error);
+      console.error(`[${new Date().toISOString()}] API Error: getFile - fileId: ${telegramFileId}`, error);
     }
   }
 
@@ -1067,10 +1358,16 @@ export class BotService implements OnModuleInit {
         return;
       }
 
+      console.log(`[${new Date().toISOString()}] 🔄 SYNC MESSAGE TO LINKED TOPICS:`);
+      console.log(`  - Source topic: ${messageThreadId} in group ${chat.id.toString()}`);
+      console.log(`  - Message: "${messageText.substring(0, 50)}${messageText.length > 50 ? '...' : ''}"`);
+
       // Get linked topics
       const linkedTopics = await this.topicsService.getLinkedTopics(messageThreadId, chat.id.toString());
+      console.log(`  - Found ${linkedTopics.length} linked topics: [${linkedTopics.join(', ')}]`);
 
       if (linkedTopics.length === 0) {
+        console.log(`  ⚠️ No linked topics found - skipping sync`);
         return;
       }
 
@@ -1088,12 +1385,40 @@ export class BotService implements OnModuleInit {
 
       syncMessage += `📅 ${new Date().toLocaleString('th-TH')}`;
 
-      // Send to all linked topics
+      // Send to all linked topics (Cross-group support)
       for (const linkedTopicId of linkedTopics) {
+        console.log(`    🎯 Syncing to topic ${linkedTopicId}...`);
         try {
-          await this.sendMessageToTopic(chat.id.toString(), linkedTopicId, syncMessage);
+          // Find the target topic to get its groupId
+          const linkedTopic = await this.topicsService.findByTelegramTopicId(linkedTopicId, chat.id.toString());
+
+          if (!linkedTopic) {
+            console.log(`      📍 Topic ${linkedTopicId} not found in current group, searching globally...`);
+            // Try to find in all groups if not found in current group
+            const allLinkedTopics = await this.topicsService.findByTelegramTopicIdGlobal(linkedTopicId);
+            if (allLinkedTopics.length > 0) {
+              const targetTopic = allLinkedTopics[0];
+              console.log(`      ✅ Cross-group sync: ${chat.id.toString()} → ${targetTopic.groupId} (topic: ${targetTopic.name || 'Unnamed'})`);
+              await this.sendMessageToTopic(targetTopic.groupId, linkedTopicId, syncMessage);
+            } else {
+              console.warn(`      ⚠️ Linked topic ${linkedTopicId} not found in database - cleaning up`);
+              // Remove broken link
+              await this.topicsService.removeBrokenLink(messageThreadId, linkedTopicId, chat.id.toString());
+            }
+          } else {
+            console.log(`      ✅ Same-group sync to topic: ${linkedTopic.name || 'Unnamed'}`);
+            // Same group sync
+            await this.sendMessageToTopic(chat.id.toString(), linkedTopicId, syncMessage);
+          }
+
         } catch (error) {
-          console.error(`Error syncing message to topic ${linkedTopicId}:`, error);
+          console.error(`[${new Date().toISOString()}] ❌ Error syncing message to topic ${linkedTopicId}:`, error.message);
+
+          // If it's "message thread not found", remove the broken link
+          if (error.message && error.message.includes('message thread not found')) {
+            console.warn(`[${new Date().toISOString()}] 🧹 Cleaning up broken topic link: ${linkedTopicId}`);
+            await this.topicsService.removeBrokenLink(messageThreadId, linkedTopicId, chat.id.toString());
+          }
         }
       }
 
@@ -1657,6 +1982,36 @@ export class BotService implements OnModuleInit {
     }
 
     return metadata;
+  }
+
+  // Phase 3: Notification system for mentioned users
+  private async notifyMentionedUser(
+    targetUser: any,
+    ticket: any,
+    newTopicId: number,
+    groupId: string,
+    inviterName: string
+  ): Promise<void> {
+    // newTopicId and groupId are kept for future enhancements
+    try {
+      // พยายามส่งข้อความส่วนตัวให้ user ที่ถูก mention
+      const notificationMessage =
+        `🔔 คุณถูก mention ใน Ticket Support!\n\n` +
+        `🎫 Ticket: ${ticket.ticketId}\n` +
+        `📝 หัวข้อ: ${ticket.title}\n` +
+        `👤 เชิญโดย: ${inviterName}\n\n` +
+        `💬 มี Topic ส่วนตัวรอคุณอยู่ในกลุ่ม\n` +
+        `🔗 คลิกไปที่กลุ่มและหา Topic: "👤 ${targetUser.firstName || targetUser.username} - ${ticket.ticketId}"\n\n` +
+        `✨ เริ่มสนทนาได้เลย!`;
+
+      // ส่งข้อความส่วนตัว (อาจจะส่งไม่ได้ถ้า user ไม่ได้เริ่มสนทนากับ bot)
+      await this.bot.sendMessage(targetUser.telegramId, notificationMessage);
+
+      console.log(`Successfully sent notification to user ${targetUser.username || targetUser.telegramId}`);
+    } catch (error) {
+      // ถ้าส่งข้อความส่วนตัวไม่ได้ ไม่ต้อง throw error เพราะเป็นเรื่องปกติ
+      console.log(`Could not send private message to user ${targetUser.username || targetUser.telegramId}:`, error.message);
+    }
   }
 
   // Enhanced message processing with metadata

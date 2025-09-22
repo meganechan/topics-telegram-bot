@@ -35,10 +35,10 @@ export class Message {
   @Prop({ required: true })
   senderId: string; // User Telegram ID
 
-  @Prop({ required: true })
+  @Prop()
   senderUsername?: string;
 
-  @Prop({ required: true })
+  @Prop()
   senderFirstName?: string;
 
   @Prop()
