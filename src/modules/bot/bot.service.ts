@@ -28,15 +28,63 @@ export class BotService implements OnModuleInit {
     if (!botToken) {
       throw new Error('TELEGRAM_BOT_TOKEN is required');
     }
-    this.bot = new TelegramBot(botToken, { polling: true });
+    this.bot = new TelegramBot(botToken, { polling: false });
   }
 
   async onModuleInit() {
     this.setupCommands();
+    await this.setupWebhook();
     console.log('Telegram bot started successfully');
 
     // Schedule automatic topic sync every 6 hours
     this.scheduleTopicSync();
+  }
+
+  async processWebhookUpdate(update: any) {
+    try {
+      this.bot.processUpdate(update);
+    } catch (error) {
+      console.error('Error processing webhook update in BotService:', error);
+      throw error;
+    }
+  }
+
+  private async setupWebhook() {
+    try {
+      const webhookUrl = this.configService.get<string>('telegram.webhookUrl');
+      if (!webhookUrl) {
+        console.warn('TELEGRAM_WEBHOOK_URL not configured, skipping webhook setup');
+        return;
+      }
+
+      const fullWebhookUrl = `${webhookUrl}/webhook/telegram`;
+      await this.bot.setWebHook(fullWebhookUrl);
+      console.log(`Webhook configured successfully: ${fullWebhookUrl}`);
+    } catch (error) {
+      console.error('Failed to setup webhook:', error);
+      throw error;
+    }
+  }
+
+  async removeWebhook() {
+    try {
+      await this.bot.deleteWebHook();
+      console.log('Webhook removed successfully');
+    } catch (error) {
+      console.error('Failed to remove webhook:', error);
+      throw error;
+    }
+  }
+
+  async getWebhookInfo() {
+    try {
+      const info = await this.bot.getWebHookInfo();
+      console.log('Current webhook info:', info);
+      return info;
+    } catch (error) {
+      console.error('Failed to get webhook info:', error);
+      throw error;
+    }
   }
 
   private scheduleTopicSync() {

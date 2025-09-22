@@ -14,6 +14,7 @@ import { GroupsModule } from './modules/groups/groups.module';
 import { TopicsModule } from './modules/topics/topics.module';
 import { AttachmentsModule } from './modules/attachments/attachments.module';
 import { MessagesModule } from './modules/messages/messages.module';
+import { WebhookModule } from './webhook/webhook.module';
 
 @Module({
   imports: [
@@ -39,6 +40,7 @@ import { MessagesModule } from './modules/messages/messages.module';
     TopicsModule,
     AttachmentsModule,
     MessagesModule,
+    WebhookModule,
   ],
 })
 export class AppModule {}
