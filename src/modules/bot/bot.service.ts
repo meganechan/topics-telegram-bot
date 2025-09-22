@@ -1418,16 +1418,7 @@ export class BotService implements OnModuleInit {
       // Prepare sync message
       let syncMessage = `🔗 **Synced Message**\n\n`;
       syncMessage += `📝 ${messageText}\n\n`;
-      syncMessage += `👤 จาก: ${user.first_name || user.username || 'ผู้ใช้'} (Topic อื่น)\n`;
-
-      if (sourceTopic.ticketId) {
-        const ticket = await this.ticketService.findByTicketId(sourceTopic.ticketId);
-        if (ticket) {
-          syncMessage += `🎫 Ticket: ${ticket.ticketId}\n`;
-        }
-      }
-
-      syncMessage += `📅 ${new Date().toLocaleString('th-TH')}`;
+      syncMessage += `👤 จาก: ${user.first_name || user.username || 'ผู้ใช้'}\n`;
 
       // Send to all linked topics (Cross-group support)
       for (const linkedTopicId of linkedTopics) {
@@ -2125,8 +2116,7 @@ export class BotService implements OnModuleInit {
       }
 
       // Create sync caption
-      let syncCaption = `📎 Synced from ${fromTopicInfo?.name || 'Unknown Topic'}\n`;
-      syncCaption += `👤 From: ${senderInfo}${message.senderUsername ? ` (@${message.senderUsername})` : ''}`;
+      let syncCaption = `📎 Synced from 👤 From: ${senderInfo}`;
 
       if (message.text || message.caption) {
         syncCaption += `\n💬 ${message.text || message.caption}`;
