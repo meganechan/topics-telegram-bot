@@ -17,8 +17,14 @@ export class Topic {
   @Prop()
   ticketId?: string; // Ticket ID
 
-  @Prop({ type: [Number], default: [] })
-  linkedTopics: number[]; // Array of linked topic IDs
+  @Prop({
+    type: [{
+      topicId: { type: Number, required: true },
+      groupId: { type: String, required: true }
+    }],
+    default: []
+  })
+  linkedTopics: Array<{ topicId: number; groupId: string }>; // Array of linked topic info
 
   @Prop({ type: [String], default: [] })
   participants: string[]; // Array of User Telegram IDs

@@ -59,19 +59,19 @@ export class TopicsService {
     console.log(`  - Topic1: ${topicId1} in group ${topic1.groupId}`);
     console.log(`  - Topic2: ${topicId2} in group ${topic2.groupId}`);
 
-    // อัพเดต topic1 ให้ link ไป topic2
+    // อัพเดต topic1 ให้ link ไป topic2 (เก็บทั้ง topicId และ groupId)
     await this.topicModel
       .updateOne(
         { telegramTopicId: topicId1, groupId: topic1.groupId },
-        { $addToSet: { linkedTopics: topicId2 } },
+        { $addToSet: { linkedTopics: { topicId: topicId2, groupId: topic2.groupId } } },
       )
       .exec();
 
-    // อัพเดต topic2 ให้ link ไป topic1
+    // อัพเดต topic2 ให้ link ไป topic1 (เก็บทั้ง topicId และ groupId)
     await this.topicModel
       .updateOne(
         { telegramTopicId: topicId2, groupId: topic2.groupId },
-        { $addToSet: { linkedTopics: topicId1 } },
+        { $addToSet: { linkedTopics: { topicId: topicId1, groupId: topic1.groupId } } },
       )
       .exec();
 
@@ -110,19 +110,19 @@ export class TopicsService {
     console.log(`  - Topic1: ${topicId1} in group ${topic1.groupId}`);
     console.log(`  - Topic2: ${topicId2} in group ${topic2.groupId}`);
 
-    // ลบ link จาก topic1 ไป topic2
+    // ลบ link จาก topic1 ไป topic2 (ใช้ object structure ใหม่)
     await this.topicModel
       .updateOne(
         { telegramTopicId: topicId1, groupId: topic1.groupId },
-        { $pull: { linkedTopics: topicId2 } },
+        { $pull: { linkedTopics: { topicId: topicId2, groupId: topic2.groupId } } },
       )
       .exec();
 
-    // ลบ link จาก topic2 ไป topic1
+    // ลบ link จาก topic2 ไป topic1 (ใช้ object structure ใหม่)
     await this.topicModel
       .updateOne(
         { telegramTopicId: topicId2, groupId: topic2.groupId },
-        { $pull: { linkedTopics: topicId1 } },
+        { $pull: { linkedTopics: { topicId: topicId1, groupId: topic1.groupId } } },
       )
       .exec();
 
@@ -132,27 +132,18 @@ export class TopicsService {
   async getLinkedTopics(
     telegramTopicId: number,
     groupId: string,
-  ): Promise<number[]> {
-    // ค้นหา topic ใน group ปัจจุบันก่อน
-    let topic = await this.findByTelegramTopicId(telegramTopicId, groupId);
+  ): Promise<Array<{ topicId: number; groupId: string }>> {
+    // ค้นหา topic ใน group ที่ระบุ
+    const topic = await this.findByTelegramTopicId(telegramTopicId, groupId);
 
     if (!topic) {
-      // ถ้าไม่เจอใน group ปัจจุบัน ให้ค้นหา globally (รองรับ cross-group)
-      console.log(`  🔍 Topic ${telegramTopicId} not found in group ${groupId}, searching globally...`);
-      const allTopics = await this.findByTelegramTopicIdGlobal(telegramTopicId);
-
-      if (allTopics.length > 0) {
-        // ใช้ topic แรกที่เจอ (สำหรับ cross-group linking)
-        topic = allTopics[0];
-        console.log(`  ✅ Found topic globally in group ${topic.groupId}`);
-      } else {
-        console.log(`  ❌ Topic ${telegramTopicId} not found globally`);
-        return [];
-      }
+      console.log(`  ❌ Topic ${telegramTopicId} not found in group ${groupId}`);
+      return [];
     }
 
     const linkedTopics = topic?.linkedTopics || [];
-    console.log(`  📋 Topic ${telegramTopicId} has ${linkedTopics.length} linked topics: [${linkedTopics.join(', ')}]`);
+    console.log(`  📋 Topic ${telegramTopicId} has ${linkedTopics.length} linked topics:`,
+      linkedTopics.map(lt => `${lt.topicId}@${lt.groupId}`).join(', '));
     return linkedTopics;
   }
 

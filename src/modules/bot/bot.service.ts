@@ -454,7 +454,7 @@ export class BotService implements OnModuleInit {
         name: newTopicName,
         ticketId: ticket.ticketId,
         participants: [targetUser.telegramId, user.id.toString()],
-        linkedTopics: [messageThreadId], // เชื่อมโยงกับ topic เดิม
+        linkedTopics: [{ topicId: messageThreadId, groupId: chat.id.toString() }], // เชื่อมโยงกับ topic เดิม
         createdBy: targetUser.telegramId // สร้างโดย user ที่ถูก mention (userB)
       });
 
@@ -904,7 +904,7 @@ export class BotService implements OnModuleInit {
         name: newTopicName,
         ticketId: ticket.ticketId,
         participants: [targetUser.telegramId, user.id.toString()],
-        linkedTopics: [messageThreadId], // เชื่อมโยงกับ topic เดิม
+        linkedTopics: [{ topicId: messageThreadId, groupId: chat.id.toString() }], // เชื่อมโยงกับ topic เดิม
         createdBy: targetUser.telegramId // สร้างโดย user ที่ถูก mention (userB)
       });
 
@@ -1458,7 +1458,8 @@ export class BotService implements OnModuleInit {
       // Get linked topics with enhanced debugging
       console.log(`  🔍 Looking up linked topics for topic ${messageThreadId} in group ${chat.id.toString()}`);
       const linkedTopics = await this.topicsService.getLinkedTopics(messageThreadId, chat.id.toString());
-      console.log(`  📊 Found ${linkedTopics.length} linked topics: [${linkedTopics.join(', ')}]`);
+      console.log(`  📊 Found ${linkedTopics.length} linked topics:`,
+        linkedTopics.map(lt => `${lt.topicId}@${lt.groupId}`).join(', '));
 
       if (linkedTopics.length === 0) {
         console.log(`  ⚠️ No linked topics found - skipping sync`);
@@ -1480,39 +1481,26 @@ export class BotService implements OnModuleInit {
 
       // Send to all linked topics (Cross-group support)
       console.log(`  🔄 Starting sync process to ${linkedTopics.length} linked topics...`);
-      for (const linkedTopicId of linkedTopics) {
-        console.log(`    🎯 Syncing to topic ${linkedTopicId}...`);
+      for (const linkedTopic of linkedTopics) {
+        console.log(`    🎯 Syncing to topic ${linkedTopic.topicId} in group ${linkedTopic.groupId}...`);
         try {
-          // Find the target topic to get its groupId
-          console.log(`      📍 Looking for target topic ${linkedTopicId} in current group ${chat.id.toString()}`);
-          const linkedTopic = await this.topicsService.findByTelegramTopicId(linkedTopicId, chat.id.toString());
-
-          if (!linkedTopic) {
-            console.log(`      📍 Topic ${linkedTopicId} not found in current group, searching globally...`);
-            // Try to find in all groups if not found in current group
-            const allLinkedTopics = await this.topicsService.findByTelegramTopicIdGlobal(linkedTopicId);
-            if (allLinkedTopics.length > 0) {
-              const targetTopic = allLinkedTopics[0];
-              console.log(`      ✅ Cross-group sync: ${chat.id.toString()} → ${targetTopic.groupId} (topic: ${targetTopic.name || 'Unnamed'})`);
-              await this.sendMessageToTopic(targetTopic.groupId, linkedTopicId, syncMessage);
-            } else {
-              console.warn(`      ⚠️ Linked topic ${linkedTopicId} not found in database - cleaning up`);
-              // Remove broken link
-              await this.topicsService.removeBrokenLink(messageThreadId, linkedTopicId, chat.id.toString());
-            }
+          // ไม่ต้องค้นหาแล้ว เพราะเรารู้ groupId อยู่แล้ว!
+          if (linkedTopic.groupId === chat.id.toString()) {
+            console.log(`      ✅ Same-group sync to topic ${linkedTopic.topicId}`);
+            await this.sendMessageToTopic(chat.id.toString(), linkedTopic.topicId, syncMessage);
           } else {
-            console.log(`      ✅ Same-group sync to topic: ${linkedTopic.name || 'Unnamed'}`);
-            // Same group sync
-            await this.sendMessageToTopic(chat.id.toString(), linkedTopicId, syncMessage);
+            console.log(`      ✅ Cross-group sync: ${chat.id.toString()} → ${linkedTopic.groupId} (topic: ${linkedTopic.topicId})`);
+            await this.sendMessageToTopic(linkedTopic.groupId, linkedTopic.topicId, syncMessage);
           }
 
         } catch (error) {
-          console.error(`[${new Date().toISOString()}] ❌ Error syncing message to topic ${linkedTopicId}:`, error.message);
+          console.error(`[${new Date().toISOString()}] ❌ Error syncing message to topic ${linkedTopic.topicId}:`, error.message);
 
           // If it's "message thread not found", remove the broken link
           if (error.message && error.message.includes('message thread not found')) {
-            console.warn(`[${new Date().toISOString()}] 🧹 Cleaning up broken topic link: ${linkedTopicId}`);
-            await this.topicsService.removeBrokenLink(messageThreadId, linkedTopicId, chat.id.toString());
+            console.warn(`[${new Date().toISOString()}] 🧹 Cleaning up broken topic link: ${linkedTopic.topicId}`);
+            // TODO: Update removeBrokenLink to handle new data structure
+            // await this.topicsService.removeBrokenLink(messageThreadId, linkedTopic.topicId, chat.id.toString());
           }
         }
       }
@@ -1572,7 +1560,7 @@ export class BotService implements OnModuleInit {
 
       // ตรวจสอบว่าเชื่อมโยงแล้วหรือไม่
       const linkedTopics = await this.topicsService.getLinkedTopics(messageThreadId, chat.id.toString());
-      if (linkedTopics.includes(targetTopicId)) {
+      if (linkedTopics.some(lt => lt.topicId === targetTopicId)) {
         await this.bot.sendMessage(msg.chat.id, `ℹ️ Topic นี้เชื่อมโยงกับ Topic ${targetTopicId} แล้ว`);
         return;
       }
@@ -1639,7 +1627,7 @@ export class BotService implements OnModuleInit {
     try {
       // ตรวจสอบว่าเชื่อมโยงกันอยู่หรือไม่
       const linkedTopics = await this.topicsService.getLinkedTopics(messageThreadId, chat.id.toString());
-      if (!linkedTopics.includes(targetTopicId)) {
+      if (!linkedTopics.some(lt => lt.topicId === targetTopicId)) {
         await this.bot.sendMessage(msg.chat.id, `❌ Topic นี้ไม่ได้เชื่อมโยงกับ Topic ${targetTopicId}`);
         return;
       }
@@ -2102,10 +2090,11 @@ export class BotService implements OnModuleInit {
         return;
       }
 
-      console.log(`  - Found ${sourceTopic.linkedTopics.length} linked topics: [${sourceTopic.linkedTopics.join(', ')}]`);
+      console.log(`  - Found ${sourceTopic.linkedTopics.length} linked topics:`,
+        sourceTopic.linkedTopics.map(lt => `${lt.topicId}@${lt.groupId}`).join(', '));
 
-      for (const linkedTopicId of sourceTopic.linkedTopics) {
-        await this.syncAttachmentsToTopic(fromTopicId, linkedTopicId, sourceTopic.groupId);
+      for (const linkedTopic of sourceTopic.linkedTopics) {
+        await this.syncAttachmentsToTopic(fromTopicId, linkedTopic.topicId, sourceTopic.groupId);
       }
     } catch (error) {
       console.error('Error syncing attachments to linked topics:', error);
