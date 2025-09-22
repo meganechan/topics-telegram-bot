@@ -133,8 +133,27 @@ export class TopicsService {
     telegramTopicId: number,
     groupId: string,
   ): Promise<number[]> {
-    const topic = await this.findByTelegramTopicId(telegramTopicId, groupId);
-    return topic?.linkedTopics || [];
+    // ค้นหา topic ใน group ปัจจุบันก่อน
+    let topic = await this.findByTelegramTopicId(telegramTopicId, groupId);
+
+    if (!topic) {
+      // ถ้าไม่เจอใน group ปัจจุบัน ให้ค้นหา globally (รองรับ cross-group)
+      console.log(`  🔍 Topic ${telegramTopicId} not found in group ${groupId}, searching globally...`);
+      const allTopics = await this.findByTelegramTopicIdGlobal(telegramTopicId);
+
+      if (allTopics.length > 0) {
+        // ใช้ topic แรกที่เจอ (สำหรับ cross-group linking)
+        topic = allTopics[0];
+        console.log(`  ✅ Found topic globally in group ${topic.groupId}`);
+      } else {
+        console.log(`  ❌ Topic ${telegramTopicId} not found globally`);
+        return [];
+      }
+    }
+
+    const linkedTopics = topic?.linkedTopics || [];
+    console.log(`  📋 Topic ${telegramTopicId} has ${linkedTopics.length} linked topics: [${linkedTopics.join(', ')}]`);
+    return linkedTopics;
   }
 
   async addParticipant(

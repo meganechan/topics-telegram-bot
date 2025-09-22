@@ -53,6 +53,45 @@ export class BotService implements OnModuleInit {
     console.log(`[${new Date().toISOString()}] 📅 Scheduled topic sync every 6 hours`);
   }
 
+  // Network resilience wrapper for Telegram API calls
+  private async withRetry<T>(
+    operation: () => Promise<T>,
+    maxRetries: number = 3,
+    delay: number = 1000,
+    operationName: string = 'Telegram API'
+  ): Promise<T> {
+    let lastError: any;
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        return await operation();
+      } catch (error: any) {
+        lastError = error;
+
+        // ตรวจสอบว่าเป็น network error ที่ควร retry หรือไม่
+        const shouldRetry = (
+          error.code === 'ECONNRESET' ||
+          error.code === 'ECONNREFUSED' ||
+          error.code === 'ETIMEDOUT' ||
+          error.code === 'EFATAL' ||
+          (error.response && error.response.status >= 500)
+        );
+
+        if (!shouldRetry || attempt === maxRetries) {
+          console.error(`[${new Date().toISOString()}] ❌ ${operationName} failed permanently after ${attempt} attempts:`, error);
+          throw lastError;
+        }
+
+        const waitTime = delay * Math.pow(2, attempt - 1); // Exponential backoff
+        console.log(`[${new Date().toISOString()}] ⚠️ ${operationName} failed (attempt ${attempt}/${maxRetries}), retrying in ${waitTime}ms...`, error.message);
+
+        await new Promise(resolve => setTimeout(resolve, waitTime));
+      }
+    }
+
+    throw lastError;
+  }
+
   private logApiCall(method: string, params?: string): void {
     console.log(`[${new Date().toISOString()}] API Call: ${method}${params ? ` - ${params}` : ''}`);
   }
@@ -186,7 +225,12 @@ export class BotService implements OnModuleInit {
       console.log('Debug text content type:', typeof text, 'length:', text.length, 'preview:', text.substring(0, 100) + (text.length > 100 ? '...' : ''));
 
       const startTime = Date.now();
-      const result = await this.bot.sendMessage(chatId, text, sendOptions);
+      const result = await this.withRetry(
+        () => this.bot.sendMessage(chatId, text, sendOptions),
+        3,
+        1000,
+        'sendMessage'
+      );
       const duration = Date.now() - startTime;
 
       console.log(`[${new Date().toISOString()}] API Response: sendMessage - Duration: ${duration}ms, MessageId: ${result.message_id}`);
@@ -1326,7 +1370,12 @@ export class BotService implements OnModuleInit {
       console.log(`[${new Date().toISOString()}] API Call: getFile - fileId: ${telegramFileId}`);
       const startTime = Date.now();
       
-      const fileInfo = await this.bot.getFile(telegramFileId);
+      const fileInfo = await this.withRetry(
+        () => this.bot.getFile(telegramFileId),
+        3,
+        1000,
+        'getFile'
+      );
       const duration = Date.now() - startTime;
       
       console.log(`[${new Date().toISOString()}] API Response: getFile - Duration: ${duration}ms, filePath: ${fileInfo.file_path}`);
@@ -1406,12 +1455,21 @@ export class BotService implements OnModuleInit {
       console.log(`  - Source topic: ${messageThreadId} in group ${chat.id.toString()}`);
       console.log(`  - Message: "${messageText.substring(0, 50)}${messageText.length > 50 ? '...' : ''}"`);
 
-      // Get linked topics
+      // Get linked topics with enhanced debugging
+      console.log(`  🔍 Looking up linked topics for topic ${messageThreadId} in group ${chat.id.toString()}`);
       const linkedTopics = await this.topicsService.getLinkedTopics(messageThreadId, chat.id.toString());
-      console.log(`  - Found ${linkedTopics.length} linked topics: [${linkedTopics.join(', ')}]`);
+      console.log(`  📊 Found ${linkedTopics.length} linked topics: [${linkedTopics.join(', ')}]`);
 
       if (linkedTopics.length === 0) {
         console.log(`  ⚠️ No linked topics found - skipping sync`);
+        console.log(`  🔍 Debug: Checking if topic ${messageThreadId} exists in database...`);
+        const topicExists = await this.topicsService.findByTelegramTopicId(messageThreadId, chat.id.toString());
+        if (topicExists) {
+          console.log(`  ✅ Topic found in database but has no linked topics`);
+          console.log(`  📋 Current topic linkedTopics array:`, topicExists.linkedTopics || []);
+        } else {
+          console.log(`  ❌ Topic not found in database - this could be the issue`);
+        }
         return;
       }
 
@@ -1421,10 +1479,12 @@ export class BotService implements OnModuleInit {
       syncMessage += `👤 จาก: ${user.first_name || user.username || 'ผู้ใช้'}\n`;
 
       // Send to all linked topics (Cross-group support)
+      console.log(`  🔄 Starting sync process to ${linkedTopics.length} linked topics...`);
       for (const linkedTopicId of linkedTopics) {
         console.log(`    🎯 Syncing to topic ${linkedTopicId}...`);
         try {
           // Find the target topic to get its groupId
+          console.log(`      📍 Looking for target topic ${linkedTopicId} in current group ${chat.id.toString()}`);
           const linkedTopic = await this.topicsService.findByTelegramTopicId(linkedTopicId, chat.id.toString());
 
           if (!linkedTopic) {
@@ -2158,44 +2218,68 @@ export class BotService implements OnModuleInit {
 
     switch (attachment.fileType) {
       case 'photo':
-        await this.bot.sendPhoto(groupId, attachment.telegramFileId, options);
+        await this.withRetry(
+          () => this.bot.sendPhoto(groupId, attachment.telegramFileId, options),
+          3, 1000, 'sendPhoto'
+        );
         break;
 
       case 'sticker':
         // Stickers don't support captions, send caption separately
-        await this.bot.sendSticker(groupId, attachment.telegramFileId, { message_thread_id: toTopicId });
+        await this.withRetry(
+          () => this.bot.sendSticker(groupId, attachment.telegramFileId, { message_thread_id: toTopicId }),
+          3, 1000, 'sendSticker'
+        );
         if (caption) {
           await this.sendMessageToTopic(groupId, toTopicId, caption);
         }
         break;
 
       case 'video':
-        await this.bot.sendVideo(groupId, attachment.telegramFileId, options);
+        await this.withRetry(
+          () => this.bot.sendVideo(groupId, attachment.telegramFileId, options),
+          3, 1000, 'sendVideo'
+        );
         break;
 
       case 'audio':
-        await this.bot.sendAudio(groupId, attachment.telegramFileId, options);
+        await this.withRetry(
+          () => this.bot.sendAudio(groupId, attachment.telegramFileId, options),
+          3, 1000, 'sendAudio'
+        );
         break;
 
       case 'voice':
-        await this.bot.sendVoice(groupId, attachment.telegramFileId, options);
+        await this.withRetry(
+          () => this.bot.sendVoice(groupId, attachment.telegramFileId, options),
+          3, 1000, 'sendVoice'
+        );
         break;
 
       case 'video_note':
         // Video notes don't support captions, send caption separately
-        await this.bot.sendVideoNote(groupId, attachment.telegramFileId, { message_thread_id: toTopicId });
+        await this.withRetry(
+          () => this.bot.sendVideoNote(groupId, attachment.telegramFileId, { message_thread_id: toTopicId }),
+          3, 1000, 'sendVideoNote'
+        );
         if (caption) {
           await this.sendMessageToTopic(groupId, toTopicId, caption);
         }
         break;
 
       case 'animation':
-        await this.bot.sendAnimation(groupId, attachment.telegramFileId, options);
+        await this.withRetry(
+          () => this.bot.sendAnimation(groupId, attachment.telegramFileId, options),
+          3, 1000, 'sendAnimation'
+        );
         break;
 
       case 'document':
       default:
-        await this.bot.sendDocument(groupId, attachment.telegramFileId, options);
+        await this.withRetry(
+          () => this.bot.sendDocument(groupId, attachment.telegramFileId, options),
+          3, 1000, 'sendDocument'
+        );
         break;
     }
   }
