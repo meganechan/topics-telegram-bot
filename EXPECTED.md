@@ -3,7 +3,7 @@
 ## Project Overview
 ระบบ Telegram Bot สำหรับจัดการ Ticket Support ที่ใช้ Telegram Topics ในการสร้างพื้นที่สนทนาแยกกันสำหรับแต่ละ Ticket และสามารถ integrate กับระบบภายนอกผ่าน REST API และ Webhook System
 
-## Phase 1: Core Infrastructure Setup
+## Phase 1: Core Infrastructure Setup ✅ COMPLETED
 ### Expected Deliverables:
 
 #### 1. NestJS Application Structure
@@ -29,10 +29,13 @@ src/
 - **Config**: `@nestjs/config`
 - **Dev**: `typescript`, `ts-node`, `nodemon`
 
-#### 3. Database Schemas (MongoDB)
-- **User Schema**: telegramId, username, firstName, lastName, isBot, createdAt
+#### 3. Database Schemas (MongoDB) ✅
+- **User Schema**: telegramId, username, firstName, lastName, isBot, defaultGroupId, createdAt
 - **Group Schema**: telegramGroupId, title, type, botIsAdmin, supportTopicsEnabled
 - **Ticket Schema**: ticketId, title, description, status, priority, createdBy, groupId
+- **Topic Schema**: telegramTopicId, name, groupId, ticketId, participants, linkedTopics
+- **Message Schema**: messageId, text, sender, replyTo, forwarded, attachments, metadata
+- **Attachment Schema**: fileName, fileId, fileType, fileSize, downloadUrl, uploadedBy
 
 #### 4. Telegram Bot Integration
 - Bot token configuration
@@ -55,22 +58,22 @@ src/
 
 ---
 
-## Phase 2: Basic Ticket Management
+## Phase 2: Basic Ticket Management ✅ COMPLETED
 ### Expected Deliverables:
 
-#### 1. Ticket Creation System
+#### 1. Ticket Creation System ✅
 - `/create_ticket <title> [description]` command
 - Automatic Telegram Topic creation
 - Ticket-Topic linking in database
-- Ticket ID generation (e.g., TICK-001)
+- Ticket ID generation (e.g., TICK-MFUVZYDY-35975E9E)
 
-#### 2. Ticket Management
+#### 2. Ticket Management ✅
 - `/close_ticket` command in topics
 - Ticket status updates (open/closed/pending)
 - Topic status management
 - Ticket metadata tracking
 
-#### 3. Basic Message Handling
+#### 3. Basic Message Handling ✅
 - Message capture in ticket topics
 - Basic message validation
 - Topic-specific message routing
@@ -83,62 +86,77 @@ src/
 
 ---
 
-## Phase 3: Internal User Integration
+## Phase 3: Internal User Integration ✅ COMPLETED
 ### Expected Deliverables:
 
-#### 1. Internal User System
+#### 1. Internal User System ✅
 - `/mention <username>` command for internal users from database only
 - Internal user lookup from system database
 - Internal user topic creation using system data
 - User state management across topics
 - Inline reply when mention without user specification
 
-#### 2. Topic Linking System
+#### 2. Topic Linking System ✅
 - Topic-to-topic relationship mapping
 - Linked topic validation
 - Link/unlink functionality
+- **Cross-group topic linking support** ⭐
 
-#### 3. Message Synchronization
+#### 3. Message Synchronization ✅
 - Real-time message forwarding
-- Bidirectional sync between linked topics
+- **Bidirectional sync between linked topics (Cross-group)** ⭐
 - Message attribution (sender identification)
 - Sync status tracking
+- **Enhanced message flow logging** ⭐
 
 ### Success Criteria:
 - ✅ `/mention` creates internal user topic
 - ✅ Inline reply works when mention without user
 - ✅ Topics link successfully
-- ✅ Messages sync in real-time
-- ✅ Both sides can communicate seamlessly
+- ✅ **Messages sync in real-time (2-way cross-group)** ⭐
+- ✅ **Both sides can communicate seamlessly across groups** ⭐
+
+### 🔧 Critical Fixes Applied:
+#### **2-Way Sync Issue Resolution**:
+- **Problem**: Message sync was 1-way only (A → B worked, B → A failed)
+- **Root Cause**: Asymmetric topic linking in cross-group scenarios
+- **Solution**: Enhanced topic lookup and symmetric linking system
+
+#### **Technical Improvements**:
+- **Cross-group Topic Lookup**: `handleTopicMessage()` now searches globally
+- **Symmetric Topic Linking**: `linkTopics()` uses correct groupId for each topic
+- **Enhanced Debugging**: Comprehensive logging for message flow tracking
 
 ---
 
-## Phase 4: Attachment & Message Enhancement
+## Phase 4: Attachment & Message Enhancement ✅ COMPLETED
 ### Expected Deliverables:
 
-#### 1. Attachment System
+#### 1. Attachment System ✅
 - Support for photos, documents, videos
 - Attachment metadata storage
 - File download/upload handling
 - Thumbnail generation for images
+- **Enhanced file validation and security checks** ⭐
 
-#### 2. Enhanced Message Features
+#### 2. Enhanced Message Features ✅
 - Reply message support
 - Forward message handling
 - Message metadata enhancement
-- Attachment sync between topics
+- **Attachment sync between topics (Cross-group support)** ⭐
 
-#### 3. File Management
+#### 3. File Management ✅
 - Local file storage system
 - File validation and security
-- Download retry mechanism
+- **Download retry mechanism with background processing** ⭐
 - File cleanup policies
 
 ### Success Criteria:
 - ✅ Files can be sent and received
 - ✅ Replies and forwards work properly
-- ✅ Attachments sync between topics
+- ✅ **Attachments sync between topics (including cross-group with actual file forwarding)** ⭐
 - ✅ File security measures in place
+- ✅ **Background file processing with retry mechanism** ⭐
 
 ---
 
@@ -216,10 +234,10 @@ POST /api/v1/tickets/:id/mention  - Mention user
 ### Core Features:
 1. **Ticket Management**: Create, update, close tickets via Telegram commands
 2. **Internal User Integration**: Mention internal users with inline reply support
-3. **Real-time Sync**: Bidirectional message synchronization
-4. **File Handling**: Complete attachment support
-5. **REST API**: Full programmatic access
-6. **Webhook Integration**: Event-driven external system integration
+3. **Real-time Sync**: **Bidirectional message synchronization (Cross-group support)** ⭐
+4. **File Handling**: Complete attachment support with background processing
+5. **REST API**: Full programmatic access (In Progress)
+6. **Webhook Integration**: Event-driven external system integration (Planned)
 
 ### Technical Specifications:
 - **Backend**: NestJS + TypeScript
@@ -232,9 +250,9 @@ POST /api/v1/tickets/:id/mention  - Mention user
 
 ### Performance Targets:
 - Handle 100+ concurrent tickets
-- Real-time message sync (<1s latency)
-- 99% webhook delivery success rate
-- API response time <200ms
+- **Real-time 2-way message sync (<1s latency, Cross-group support)** ⭐
+- 99% webhook delivery success rate (Planned)
+- API response time <200ms (In Progress)
 - Support for groups with 1000+ members
 
 ### Integration Capabilities:

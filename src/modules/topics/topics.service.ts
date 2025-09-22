@@ -188,4 +188,64 @@ export class TopicsService {
       console.error(`[${new Date().toISOString()}] ❌ Error removing broken link:`, error);
     }
   }
+
+  // 🔄 Topic Sync System
+  async getAllTopics(): Promise<Topic[]> {
+    return this.topicModel.find({}).exec();
+  }
+
+  async getTopicsByGroup(groupId: string): Promise<Topic[]> {
+    return this.topicModel.find({ groupId }).exec();
+  }
+
+  async deleteTopic(telegramTopicId: number, groupId: string): Promise<void> {
+    try {
+      console.log(`[${new Date().toISOString()}] 🗑️ Deleting topic ${telegramTopicId} from group ${groupId}`);
+
+      // ลบ topic จาก database
+      const result = await this.topicModel.deleteOne({ telegramTopicId, groupId }).exec();
+
+      if (result.deletedCount > 0) {
+        console.log(`[${new Date().toISOString()}] ✅ Successfully deleted topic ${telegramTopicId}`);
+
+        // ลบ references ของ topic นี้จาก linkedTopics ของ topics อื่น
+        await this.removeTopicReferences(telegramTopicId);
+      } else {
+        console.log(`[${new Date().toISOString()}] ⚠️ Topic ${telegramTopicId} not found in database`);
+      }
+    } catch (error) {
+      console.error(`[${new Date().toISOString()}] ❌ Error deleting topic ${telegramTopicId}:`, error);
+    }
+  }
+
+  private async removeTopicReferences(deletedTopicId: number): Promise<void> {
+    try {
+      // ลบ reference ของ topic ที่ถูกลบจาก linkedTopics ของ topics อื่น ๆ
+      await this.topicModel
+        .updateMany(
+          { linkedTopics: deletedTopicId },
+          { $pull: { linkedTopics: deletedTopicId } }
+        )
+        .exec();
+
+      console.log(`[${new Date().toISOString()}] 🧹 Removed all references to deleted topic ${deletedTopicId}`);
+    } catch (error) {
+      console.error(`[${new Date().toISOString()}] ❌ Error removing topic references:`, error);
+    }
+  }
+
+  async updateTopicActiveStatus(telegramTopicId: number, groupId: string, isActive: boolean): Promise<void> {
+    try {
+      await this.topicModel
+        .updateOne(
+          { telegramTopicId, groupId },
+          { isActive }
+        )
+        .exec();
+
+      console.log(`[${new Date().toISOString()}] 📝 Updated topic ${telegramTopicId} active status: ${isActive}`);
+    } catch (error) {
+      console.error(`[${new Date().toISOString()}] ❌ Error updating topic status:`, error);
+    }
+  }
 }

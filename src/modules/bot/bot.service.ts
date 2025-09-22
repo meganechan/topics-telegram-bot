@@ -34,6 +34,23 @@ export class BotService implements OnModuleInit {
   async onModuleInit() {
     this.setupCommands();
     console.log('Telegram bot started successfully');
+
+    // Schedule automatic topic sync every 6 hours
+    this.scheduleTopicSync();
+  }
+
+  private scheduleTopicSync() {
+    // Run topic sync every 6 hours (21600000 ms)
+    setInterval(async () => {
+      console.log(`[${new Date().toISOString()}] 🕐 Running scheduled topic sync...`);
+      try {
+        await this.syncTopicsWithTelegram();
+      } catch (error) {
+        console.error(`[${new Date().toISOString()}] ❌ Scheduled topic sync failed:`, error);
+      }
+    }, 21600000);
+
+    console.log(`[${new Date().toISOString()}] 📅 Scheduled topic sync every 6 hours`);
   }
 
   private logApiCall(method: string, params?: string): void {
@@ -213,6 +230,7 @@ export class BotService implements OnModuleInit {
     this.bot.onText(/\/mention(.*)/, this.handleMention.bind(this));
     this.bot.onText(/\/link_topic(.*)/, this.handleLinkTopic.bind(this));
     this.bot.onText(/\/unlink_topic(.*)/, this.handleUnlinkTopic.bind(this));
+    this.bot.onText(/\/sync_topics/, this.handleSyncTopics.bind(this));
 
     this.bot.on('callback_query', this.handleCallbackQuery.bind(this));
     this.bot.on('my_chat_member', this.handleChatMemberUpdate.bind(this));
@@ -434,11 +452,24 @@ export class BotService implements OnModuleInit {
         `🔗 ข้อความจะถูก sync กับ Topic หลักอัตโนมัติ\n\n` +
         `📞 @${username} กรุณาส่งข้อความเพื่อเริ่มการสนทนา`;
 
-      await this.sendMessageToTopic(
-        chat.id.toString(),
-        newTopicResult.message_thread_id,
-        initialMessage
-      );
+      try {
+        await this.sendMessageToTopic(
+          chat.id.toString(),
+          newTopicResult.message_thread_id,
+          initialMessage
+        );
+      } catch (sendError) {
+        console.error(`[${new Date().toISOString()}] ❌ Failed to send initial message to topic ${newTopicResult.message_thread_id}:`, sendError.message);
+
+        // If topic doesn't exist, clean up the link
+        if (sendError.message && sendError.message.includes('message thread not found')) {
+          console.warn(`[${new Date().toISOString()}] 🧹 Cleaning up broken mention topic link: ${newTopicResult.message_thread_id}`);
+          await this.topicsService.removeBrokenLink(messageThreadId, newTopicResult.message_thread_id, chat.id.toString());
+        }
+
+        // Don't throw - let the mention process continue
+        console.log(`[${new Date().toISOString()}] ⚠️ Mention created but initial message failed - topic may have been deleted`);
+      }
 
       // ส่งการแจ้งเตือนให้ user ที่ถูก mention (ถ้าเป็นไปได้)
       try {
@@ -871,11 +902,24 @@ export class BotService implements OnModuleInit {
         `🔗 ข้อความจะถูก sync กับ Topic หลักอัตโนมัติ\n\n` +
         `📞 @${targetUsername} กรุณาส่งข้อความเพื่อเริ่มการสนทนา`;
 
-      await this.sendMessageToTopic(
-        chat.id.toString(),
-        newTopicResult.message_thread_id,
-        initialMessage
-      );
+      try {
+        await this.sendMessageToTopic(
+          chat.id.toString(),
+          newTopicResult.message_thread_id,
+          initialMessage
+        );
+      } catch (sendError) {
+        console.error(`[${new Date().toISOString()}] ❌ Failed to send initial message to topic ${newTopicResult.message_thread_id}:`, sendError.message);
+
+        // If topic doesn't exist, clean up the link
+        if (sendError.message && sendError.message.includes('message thread not found')) {
+          console.warn(`[${new Date().toISOString()}] 🧹 Cleaning up broken mention topic link: ${newTopicResult.message_thread_id}`);
+          await this.topicsService.removeBrokenLink(messageThreadId, newTopicResult.message_thread_id, chat.id.toString());
+        }
+
+        // Don't throw - let the mention process continue
+        console.log(`[${new Date().toISOString()}] ⚠️ Mention created but initial message failed - topic may have been deleted`);
+      }
 
       // ส่งการแจ้งเตือนให้ user ที่ถูก mention (ถ้าเป็นไปได้)
       try {
@@ -1848,67 +1892,321 @@ export class BotService implements OnModuleInit {
     }
   }
 
+  // 🔄 Topic Sync System - Clean up orphaned topics
+
+  async syncTopicsWithTelegram(): Promise<void> {
+    console.log(`[${new Date().toISOString()}] 🔄 Starting topic sync process...`);
+
+    try {
+      const allTopics = await this.topicsService.getAllTopics();
+      console.log(`[${new Date().toISOString()}] 📊 Found ${allTopics.length} topics in database`);
+
+      let checkedCount = 0;
+      let deletedCount = 0;
+
+      for (const topic of allTopics) {
+        checkedCount++;
+        const exists = await this.checkTopicExists(topic.telegramTopicId, topic.groupId);
+
+        if (!exists) {
+          console.log(`[${new Date().toISOString()}] 🗑️ Topic ${topic.telegramTopicId} (${topic.name}) doesn't exist in Telegram - removing from database`);
+          await this.topicsService.deleteTopic(topic.telegramTopicId, topic.groupId);
+          deletedCount++;
+        }
+
+        // Add delay to avoid rate limiting
+        if (checkedCount % 5 === 0) {
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+      }
+
+      console.log(`[${new Date().toISOString()}] ✅ Topic sync completed: ${checkedCount} checked, ${deletedCount} deleted`);
+    } catch (error) {
+      console.error(`[${new Date().toISOString()}] ❌ Error during topic sync:`, error);
+    }
+  }
+
+  async syncTopicsForGroup(groupId: string): Promise<void> {
+    console.log(`[${new Date().toISOString()}] 🔄 Starting topic sync for group ${groupId}...`);
+
+    try {
+      const groupTopics = await this.topicsService.getTopicsByGroup(groupId);
+      console.log(`[${new Date().toISOString()}] 📊 Found ${groupTopics.length} topics for group ${groupId}`);
+
+      let checkedCount = 0;
+      let deletedCount = 0;
+
+      for (const topic of groupTopics) {
+        checkedCount++;
+        const exists = await this.checkTopicExists(topic.telegramTopicId, topic.groupId);
+
+        if (!exists) {
+          console.log(`[${new Date().toISOString()}] 🗑️ Topic ${topic.telegramTopicId} (${topic.name}) doesn't exist - removing from database`);
+          await this.topicsService.deleteTopic(topic.telegramTopicId, topic.groupId);
+          deletedCount++;
+        }
+
+        // Add delay to avoid rate limiting
+        await new Promise(resolve => setTimeout(resolve, 200));
+      }
+
+      console.log(`[${new Date().toISOString()}] ✅ Group sync completed: ${checkedCount} checked, ${deletedCount} deleted`);
+    } catch (error) {
+      console.error(`[${new Date().toISOString()}] ❌ Error during group topic sync:`, error);
+    }
+  }
+
+  private async checkTopicExists(topicId: number, groupId: string): Promise<boolean> {
+    try {
+      // ใช้ silent message ที่จะถูกลบทันที เพื่อตรวจสอบว่า topic มีอยู่หรือไม่
+      const testMessage = `🔍`; // ข้อความสั้น ๆ
+
+      console.log(`[${new Date().toISOString()}] API Call: sendMessage (validation) - chatId: ${groupId}, topicId: ${topicId}`);
+
+      const startTime = Date.now();
+      const result = await this.bot.sendMessage(groupId, testMessage, {
+        message_thread_id: topicId
+      });
+      const duration = Date.now() - startTime;
+
+      console.log(`[${new Date().toISOString()}] API Response: sendMessage (validation) - Duration: ${duration}ms, Topic ${topicId} exists`);
+
+      // ลบข้อความทดสอบทันที
+      try {
+        await this.bot.deleteMessage(groupId, result.message_id);
+      } catch (deleteError) {
+        // Ignore delete errors
+      }
+
+      return true;
+    } catch (error) {
+      const isNotFound = error.message && (
+        error.message.includes('message thread not found') ||
+        error.message.includes('topic not found') ||
+        error.message.includes('THREAD_NOT_FOUND')
+      );
+
+      if (isNotFound) {
+        console.log(`[${new Date().toISOString()}] ❌ Topic ${topicId} not found in Telegram`);
+        return false;
+      } else {
+        console.warn(`[${new Date().toISOString()}] ⚠️ Unknown error checking topic ${topicId}: ${error.message}`);
+        // ถ้าเป็น error อื่น ๆ ให้ถือว่า topic ยังมีอยู่ (เพื่อความปลอดภัย)
+        return true;
+      }
+    }
+  }
+
+  // Command handlers for manual sync
+  private async handleSyncTopics(msg: TelegramBot.Message): Promise<void> {
+    const chat = msg.chat;
+    const user = msg.from;
+
+    if (!user || !chat || chat.type === 'private') {
+      return;
+    }
+
+    try {
+      // ตรวจสอบสิทธิ์ admin
+      const permissions = await this.checkBotPermissions(chat.id.toString());
+      if (!permissions.isAdmin) {
+        await this.bot.sendMessage(chat.id, '❌ Bot ต้องมีสิทธิ์ Admin เพื่อดำเนินการ sync');
+        return;
+      }
+
+      await this.bot.sendMessage(chat.id, '🔄 เริ่มต้น topic sync... กรุณารอสักครู่');
+
+      // Sync เฉพาะ group นี้
+      await this.syncTopicsForGroup(chat.id.toString());
+
+      await this.bot.sendMessage(chat.id, '✅ Topic sync เสร็จสิ้น! Topics ที่ไม่มีอยู่จริงได้ถูกลบออกจาก database แล้ว');
+
+    } catch (error) {
+      console.error('Error handling sync topics:', error);
+      await this.bot.sendMessage(chat.id, '❌ เกิดข้อผิดพลาดในการ sync topics');
+    }
+  }
+
   // Phase 4: Attachment & Message Enhancement Features
 
   async syncAttachmentsToLinkedTopics(fromTopicId: number, groupId: string): Promise<void> {
     try {
-      // Get all linked topics for this topic
-      const sourceTopic = await this.topicsService.findByTelegramTopicId(fromTopicId, groupId);
+      console.log(`[${new Date().toISOString()}] 📎 SYNC ATTACHMENTS TO LINKED TOPICS:`);
+      console.log(`  - Source topic: ${fromTopicId} in group ${groupId}`);
+
+      // Get all linked topics for this topic - รองรับ cross-group
+      let sourceTopic = await this.topicsService.findByTelegramTopicId(fromTopicId, groupId);
+
+      // ถ้าไม่เจอใน group ปัจจุบัน ให้ค้นหา globally
+      if (!sourceTopic) {
+        const allTopics = await this.topicsService.findByTelegramTopicIdGlobal(fromTopicId);
+        sourceTopic = allTopics.find(t => t.groupId === groupId) || allTopics[0];
+        if (sourceTopic) {
+          console.log(`  📍 Found source topic via global search in group ${sourceTopic.groupId}`);
+        }
+      }
+
       if (!sourceTopic || !sourceTopic.linkedTopics || sourceTopic.linkedTopics.length === 0) {
+        console.log(`  ⚠️ No linked topics found for attachment sync`);
         return;
       }
 
+      console.log(`  - Found ${sourceTopic.linkedTopics.length} linked topics: [${sourceTopic.linkedTopics.join(', ')}]`);
+
       for (const linkedTopicId of sourceTopic.linkedTopics) {
-        await this.syncAttachmentsToTopic(fromTopicId, linkedTopicId, groupId);
+        await this.syncAttachmentsToTopic(fromTopicId, linkedTopicId, sourceTopic.groupId);
       }
     } catch (error) {
       console.error('Error syncing attachments to linked topics:', error);
     }
   }
 
-  private async syncAttachmentsToTopic(fromTopicId: number, toTopicId: number, groupId: string): Promise<void> {
+  private async syncAttachmentsToTopic(fromTopicId: number, toTopicId: number, sourceGroupId: string): Promise<void> {
     try {
+      console.log(`    📎 Syncing attachments to topic ${toTopicId}...`);
+
+      // Find target topic to get its groupId (cross-group support)
+      let targetTopic = await this.topicsService.findByTelegramTopicId(toTopicId, sourceGroupId);
+      let targetGroupId = sourceGroupId;
+
+      if (!targetTopic) {
+        console.log(`      📍 Topic ${toTopicId} not found in source group, searching globally...`);
+        const allTargetTopics = await this.topicsService.findByTelegramTopicIdGlobal(toTopicId);
+        if (allTargetTopics.length > 0) {
+          targetTopic = allTargetTopics[0];
+          targetGroupId = targetTopic.groupId;
+          console.log(`      ✅ Found target topic in group ${targetGroupId}`);
+        } else {
+          console.warn(`      ⚠️ Target topic ${toTopicId} not found - cleaning up broken link`);
+          await this.topicsService.removeBrokenLink(fromTopicId, toTopicId, sourceGroupId);
+          return;
+        }
+      }
+
       // Find unsyncable messages with attachments
-      const unsyncedMessages = await this.messagesService.findSyncableMessages(fromTopicId, toTopicId, groupId);
+      const unsyncedMessages = await this.messagesService.findSyncableMessages(fromTopicId, toTopicId, sourceGroupId);
 
       for (const message of unsyncedMessages) {
         if (message.hasAttachments && message.attachmentIds.length > 0) {
-          await this.forwardMessageWithAttachments(message, toTopicId, groupId);
+          await this.forwardMessageWithAttachments(message, toTopicId, targetGroupId);
         }
       }
     } catch (error) {
       console.error(`Error syncing attachments from topic ${fromTopicId} to ${toTopicId}:`, error);
+
+      // Check if it's a "message thread not found" error and clean up
+      if (error.message && error.message.includes('message thread not found')) {
+        console.warn(`[${new Date().toISOString()}] 🧹 Cleaning up broken attachment sync link: ${toTopicId}`);
+        await this.topicsService.removeBrokenLink(fromTopicId, toTopicId, sourceGroupId);
+      }
     }
   }
 
   private async forwardMessageWithAttachments(message: any, toTopicId: number, groupId: string): Promise<void> {
     try {
+      console.log(`      📋 Forwarding message with attachments to topic ${toTopicId} in group ${groupId}`);
+
       // Get attachment information
       const attachments = await this.attachmentsService.findByMessageId(message.telegramMessageId, message.groupId, message.topicId);
 
-      if (attachments.length === 0) return;
-
-      // Create a summary message about the forwarded content
-      const senderInfo = message.senderFirstName + (message.senderLastName ? ` ${message.senderLastName}` : '');
-      const fromTopicInfo = await this.topicsService.findByTelegramTopicId(message.topicId, groupId);
-
-      let messageText = `📎 Synced from ${fromTopicInfo?.name || 'Unknown Topic'}\n`;
-      messageText += `👤 From: ${senderInfo}${message.senderUsername ? ` (@${message.senderUsername})` : ''}\n`;
-
-      if (message.text || message.caption) {
-        messageText += `💬 ${message.text || message.caption}\n`;
+      if (attachments.length === 0) {
+        console.log(`      ⚠️ No attachments found for message ${message.telegramMessageId}`);
+        return;
       }
 
-      messageText += `📁 Attachments: ${attachments.length} file(s)`;
+      // Create sender info for caption
+      const senderInfo = message.senderFirstName + (message.senderLastName ? ` ${message.senderLastName}` : '');
 
-      // Send the sync message to the target topic
-      await this.sendMessageToTopic(groupId, toTopicId, messageText);
+      // Find source topic info - support cross-group
+      let fromTopicInfo = await this.topicsService.findByTelegramTopicId(message.topicId, message.groupId);
+      if (!fromTopicInfo) {
+        const allFromTopics = await this.topicsService.findByTelegramTopicIdGlobal(message.topicId);
+        fromTopicInfo = allFromTopics[0];
+      }
+
+      // Create sync caption
+      let syncCaption = `📎 Synced from ${fromTopicInfo?.name || 'Unknown Topic'}\n`;
+      syncCaption += `👤 From: ${senderInfo}${message.senderUsername ? ` (@${message.senderUsername})` : ''}`;
+
+      if (message.text || message.caption) {
+        syncCaption += `\n💬 ${message.text || message.caption}`;
+      }
+
+      console.log(`      📤 Forwarding ${attachments.length} actual file(s) to topic ${toTopicId}`);
+
+      // Forward each attachment by its type
+      for (const attachment of attachments) {
+        try {
+          await this.forwardAttachmentByType(attachment, toTopicId, groupId, syncCaption);
+          console.log(`        ✅ Forwarded ${attachment.fileType}: ${attachment.fileName}`);
+        } catch (attachError) {
+          console.error(`        ❌ Failed to forward ${attachment.fileType}: ${attachment.fileName}`, attachError.message);
+          // Continue with other attachments even if one fails
+        }
+      }
 
       // Mark message as synced
       await this.messagesService.markAsSynced((message as any)._id.toString(), toTopicId);
 
+      console.log(`      ✅ Successfully synced message with ${attachments.length} attachments`);
+
     } catch (error) {
       console.error('Error forwarding message with attachments:', error);
+
+      // Re-throw to let parent handle broken link cleanup
+      throw error;
+    }
+  }
+
+  private async forwardAttachmentByType(attachment: any, toTopicId: number, groupId: string, caption: string): Promise<void> {
+    const options = {
+      message_thread_id: toTopicId,
+      caption: caption.length > 1024 ? caption.substring(0, 1021) + '...' : caption, // Telegram caption limit
+    };
+
+    console.log(`        📎 Forwarding ${attachment.fileType} with fileId: ${attachment.telegramFileId}`);
+
+    switch (attachment.fileType) {
+      case 'photo':
+        await this.bot.sendPhoto(groupId, attachment.telegramFileId, options);
+        break;
+
+      case 'sticker':
+        // Stickers don't support captions, send caption separately
+        await this.bot.sendSticker(groupId, attachment.telegramFileId, { message_thread_id: toTopicId });
+        if (caption) {
+          await this.sendMessageToTopic(groupId, toTopicId, caption);
+        }
+        break;
+
+      case 'video':
+        await this.bot.sendVideo(groupId, attachment.telegramFileId, options);
+        break;
+
+      case 'audio':
+        await this.bot.sendAudio(groupId, attachment.telegramFileId, options);
+        break;
+
+      case 'voice':
+        await this.bot.sendVoice(groupId, attachment.telegramFileId, options);
+        break;
+
+      case 'video_note':
+        // Video notes don't support captions, send caption separately
+        await this.bot.sendVideoNote(groupId, attachment.telegramFileId, { message_thread_id: toTopicId });
+        if (caption) {
+          await this.sendMessageToTopic(groupId, toTopicId, caption);
+        }
+        break;
+
+      case 'animation':
+        await this.bot.sendAnimation(groupId, attachment.telegramFileId, options);
+        break;
+
+      case 'document':
+      default:
+        await this.bot.sendDocument(groupId, attachment.telegramFileId, options);
+        break;
     }
   }
 
@@ -2023,12 +2321,10 @@ export class BotService implements OnModuleInit {
       // Save message with enhanced metadata
       await this.saveMessageToDatabase(msg, topic);
 
-      // If message has attachments, sync to linked topics
+      // If message has attachments, sync to linked topics immediately for this specific message
       if (metadata.hasMedia && topic.linkedTopics && topic.linkedTopics.length > 0) {
-        // Delay sync to ensure message is saved first
-        setTimeout(() => {
-          this.syncAttachmentsToLinkedTopics(msg.message_thread_id as number, msg.chat?.id.toString() || '');
-        }, 1000);
+        // Sync attachments for this specific message only
+        await this.syncSpecificMessageAttachments(msg, topic);
       }
 
       console.log(`Processed message with metadata:`, {
@@ -2041,6 +2337,78 @@ export class BotService implements OnModuleInit {
 
     } catch (error) {
       console.error('Error processing message with metadata:', error);
+    }
+  }
+
+  private async syncSpecificMessageAttachments(msg: TelegramBot.Message, topic: any): Promise<void> {
+    try {
+      const messageThreadId = (msg as any).message_thread_id;
+      console.log(`[${new Date().toISOString()}] 📎 SYNC SPECIFIC MESSAGE ATTACHMENTS:`);
+      console.log(`  - Message ID: ${msg.message_id} in topic ${messageThreadId}`);
+      console.log(`  - Target linked topics: [${topic.linkedTopics.join(', ')}]`);
+
+      // Find the saved message in database
+      const savedMessage = await this.messagesService.findByTelegramMessageId(
+        msg.message_id,
+        msg.chat?.id.toString() || '',
+        messageThreadId
+      );
+
+      if (!savedMessage) {
+        console.log(`  ⚠️ Message ${msg.message_id} not found in database yet - skipping sync`);
+        return;
+      }
+
+      if (!savedMessage.hasAttachments || savedMessage.attachmentIds.length === 0) {
+        console.log(`  ⚠️ Message ${msg.message_id} has no attachments - skipping sync`);
+        return;
+      }
+
+      // Sync to each linked topic
+      for (const linkedTopicId of topic.linkedTopics) {
+        console.log(`    🎯 Syncing message ${msg.message_id} to topic ${linkedTopicId}...`);
+
+        // Check if already synced to this topic
+        if (savedMessage.syncedToTopics && savedMessage.syncedToTopics.includes(linkedTopicId)) {
+          console.log(`      ⏭️ Already synced to topic ${linkedTopicId} - skipping`);
+          continue;
+        }
+
+        try {
+          // Find target topic to get its groupId (cross-group support)
+          let targetTopic = await this.topicsService.findByTelegramTopicId(linkedTopicId, topic.groupId);
+          let targetGroupId = topic.groupId;
+
+          if (!targetTopic) {
+            console.log(`      📍 Topic ${linkedTopicId} not found in current group, searching globally...`);
+            const allTargetTopics = await this.topicsService.findByTelegramTopicIdGlobal(linkedTopicId);
+            if (allTargetTopics.length > 0) {
+              targetTopic = allTargetTopics[0];
+              targetGroupId = targetTopic.groupId;
+              console.log(`      ✅ Found target topic in group ${targetGroupId}`);
+            } else {
+              console.warn(`      ⚠️ Target topic ${linkedTopicId} not found - cleaning up broken link`);
+              await this.topicsService.removeBrokenLink(messageThreadId, linkedTopicId, topic.groupId);
+              continue;
+            }
+          }
+
+          // Forward this specific message's attachments
+          await this.forwardMessageWithAttachments(savedMessage, linkedTopicId, targetGroupId);
+
+        } catch (error) {
+          console.error(`      ❌ Error syncing to topic ${linkedTopicId}:`, error.message);
+
+          // Check if it's a "message thread not found" error and clean up
+          if (error.message && error.message.includes('message thread not found')) {
+            console.warn(`      🧹 Cleaning up broken sync link: ${linkedTopicId}`);
+            await this.topicsService.removeBrokenLink(messageThreadId, linkedTopicId, topic.groupId);
+          }
+        }
+      }
+
+    } catch (error) {
+      console.error('Error syncing specific message attachments:', error);
     }
   }
 }
