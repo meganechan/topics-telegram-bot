@@ -141,9 +141,32 @@ export class TopicsService {
       return [];
     }
 
-    const linkedTopics = topic?.linkedTopics || [];
-    console.log(`  📋 Topic ${telegramTopicId} has ${linkedTopics.length} linked topics:`,
+    if (!topic.ticketId) {
+      console.log(`  ⚠️ Topic ${telegramTopicId} has no ticketId - no linked topics available`);
+      return [];
+    }
+
+    console.log(`  🎫 Searching for topics with ticketId: ${topic.ticketId}`);
+
+    // ค้นหา topics อื่นที่มี ticketId เดียวกัน
+    const relatedTopics = await this.topicModel
+      .find({
+        ticketId: topic.ticketId,
+        $or: [
+          { telegramTopicId: { $ne: telegramTopicId } }, // topic อื่นที่ไม่ใช่ตัวเอง
+          { groupId: { $ne: groupId } } // หรือ topic ในกลุ่มอื่น
+        ]
+      })
+      .exec();
+
+    const linkedTopics = relatedTopics.map(relatedTopic => ({
+      topicId: relatedTopic.telegramTopicId,
+      groupId: relatedTopic.groupId
+    }));
+
+    console.log(`  🔍 Found ${linkedTopics.length} topics with same ticketId:`,
       linkedTopics.map(lt => `${lt.topicId}@${lt.groupId}`).join(', '));
+
     return linkedTopics;
   }
 
