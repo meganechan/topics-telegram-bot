@@ -2433,9 +2433,13 @@ export class BotService implements OnModuleInit {
       await this.saveMessageToDatabase(msg, topic);
 
       // If message has attachments, sync to linked topics immediately for this specific message
-      if (metadata.hasMedia && topic.linkedTopics && topic.linkedTopics.length > 0) {
-        // Sync attachments for this specific message only
-        await this.syncSpecificMessageAttachments(msg, topic);
+      if (metadata.hasMedia) {
+        const messageThreadId = (msg as any).message_thread_id;
+        const linkedTopics = await this.topicsService.getLinkedTopics(messageThreadId, msg.chat?.id.toString() || '');
+        if (linkedTopics.length > 0) {
+          // Sync attachments for this specific message only
+          await this.syncSpecificMessageAttachments(msg, topic, linkedTopics);
+        }
       }
 
       console.log(`Processed message with metadata:`, {
@@ -2451,12 +2455,12 @@ export class BotService implements OnModuleInit {
     }
   }
 
-  private async syncSpecificMessageAttachments(msg: TelegramBot.Message, topic: any): Promise<void> {
+  private async syncSpecificMessageAttachments(msg: TelegramBot.Message, topic: any, linkedTopics: Array<{ topicId: number; groupId: string }>): Promise<void> {
     try {
       const messageThreadId = (msg as any).message_thread_id;
       console.log(`[${new Date().toISOString()}] 📎 SYNC SPECIFIC MESSAGE ATTACHMENTS:`);
       console.log(`  - Message ID: ${msg.message_id} in topic ${messageThreadId}`);
-      console.log(`  - Target linked topics: [${topic.linkedTopics.join(', ')}]`);
+      console.log(`  - Target linked topics:`, linkedTopics.map(lt => `${lt.topicId}@${lt.groupId}`));
 
       // Find the saved message in database
       const savedMessage = await this.messagesService.findByTelegramMessageId(
@@ -2476,44 +2480,30 @@ export class BotService implements OnModuleInit {
       }
 
       // Sync to each linked topic
-      for (const linkedTopicId of topic.linkedTopics) {
-        console.log(`    🎯 Syncing message ${msg.message_id} to topic ${linkedTopicId}...`);
+      for (const linkedTopic of linkedTopics) {
+        console.log(`    🎯 Syncing message ${msg.message_id} to topic ${linkedTopic.topicId}@${linkedTopic.groupId}...`);
 
         // Check if already synced to this topic
-        if (savedMessage.syncedToTopics && savedMessage.syncedToTopics.includes(linkedTopicId)) {
-          console.log(`      ⏭️ Already synced to topic ${linkedTopicId} - skipping`);
+        if (savedMessage.syncedToTopics && savedMessage.syncedToTopics.includes(linkedTopic.topicId)) {
+          console.log(`      ⏭️ Already synced to topic ${linkedTopic.topicId} - skipping`);
           continue;
         }
 
         try {
-          // Find target topic to get its groupId (cross-group support)
-          let targetTopic = await this.topicsService.findByTelegramTopicId(linkedTopicId, topic.groupId);
-          let targetGroupId = topic.groupId;
-
-          if (!targetTopic) {
-            console.log(`      📍 Topic ${linkedTopicId} not found in current group, searching globally...`);
-            const allTargetTopics = await this.topicsService.findByTelegramTopicIdGlobal(linkedTopicId);
-            if (allTargetTopics.length > 0) {
-              targetTopic = allTargetTopics[0];
-              targetGroupId = targetTopic.groupId;
-              console.log(`      ✅ Found target topic in group ${targetGroupId}`);
-            } else {
-              console.warn(`      ⚠️ Target topic ${linkedTopicId} not found - cleaning up broken link`);
-              await this.topicsService.removeBrokenLink(messageThreadId, linkedTopicId, topic.groupId);
-              continue;
-            }
-          }
+          // Use the groupId from linkedTopic directly
+          const targetGroupId = linkedTopic.groupId;
+          const linkedTopicId = linkedTopic.topicId;
 
           // Forward this specific message's attachments
           await this.forwardMessageWithAttachments(savedMessage, linkedTopicId, targetGroupId);
 
         } catch (error) {
-          console.error(`      ❌ Error syncing to topic ${linkedTopicId}:`, error.message);
+          console.error(`      ❌ Error syncing to topic ${linkedTopic.topicId}:`, error.message);
 
           // Check if it's a "message thread not found" error and clean up
           if (error.message && error.message.includes('message thread not found')) {
-            console.warn(`      🧹 Cleaning up broken sync link: ${linkedTopicId}`);
-            await this.topicsService.removeBrokenLink(messageThreadId, linkedTopicId, topic.groupId);
+            console.warn(`      🧹 Cleaning up broken sync link: ${linkedTopic.topicId}`);
+            await this.topicsService.removeBrokenLink(messageThreadId, linkedTopic.topicId, topic.groupId);
           }
         }
       }
