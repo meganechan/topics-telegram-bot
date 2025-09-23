@@ -205,20 +205,44 @@ export class TopicsService {
 
   async removeBrokenLink(
     sourceTopicId: number,
-    brokenLinkId: number,
-    groupId: string,
+    brokenTopicId: number,
+    brokenGroupId: string,
+    sourceGroupId: string,
   ): Promise<void> {
     try {
+      // Remove the broken link using the new object structure
       await this.topicModel
         .updateOne(
-          { telegramTopicId: sourceTopicId, groupId },
-          { $pull: { linkedTopics: brokenLinkId } }
+          { telegramTopicId: sourceTopicId, groupId: sourceGroupId },
+          { $pull: { linkedTopics: { topicId: brokenTopicId, groupId: brokenGroupId } } }
         )
         .exec();
 
-      console.log(`[${new Date().toISOString()}] 🧹 Removed broken link ${brokenLinkId} from topic ${sourceTopicId}`);
+      console.log(`[${new Date().toISOString()}] 🧹 Removed broken link ${brokenTopicId}@${brokenGroupId} from topic ${sourceTopicId}@${sourceGroupId}`);
     } catch (error) {
       console.error(`[${new Date().toISOString()}] ❌ Error removing broken link:`, error);
+    }
+  }
+
+  async deleteTopicAndRelations(telegramTopicId: number, groupId: string): Promise<void> {
+    try {
+      console.log(`[${new Date().toISOString()}] 🗑️ Deleting topic ${telegramTopicId}@${groupId} and all its relations`);
+
+      // First find the topic to get its linked topics
+      const topic = await this.findByTelegramTopicId(telegramTopicId, groupId);
+
+      if (topic && topic.linkedTopics && topic.linkedTopics.length > 0) {
+        // Remove this topic from all linked topics
+        for (const linkedTopic of topic.linkedTopics) {
+          await this.removeBrokenLink(linkedTopic.topicId, telegramTopicId, groupId, linkedTopic.groupId);
+        }
+      }
+
+      // Delete the topic itself
+      await this.deleteTopic(telegramTopicId, groupId);
+
+    } catch (error) {
+      console.error(`[${new Date().toISOString()}] ❌ Error deleting topic and relations:`, error);
     }
   }
 

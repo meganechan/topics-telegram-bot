@@ -28,7 +28,14 @@ export class BotService implements OnModuleInit {
     if (!botToken) {
       throw new Error('TELEGRAM_BOT_TOKEN is required');
     }
-    this.bot = new TelegramBot(botToken, { polling: false });
+
+    // Disable Telegram HTTP request logging
+    process.env.NTBA_FIX_319 = '1';
+    process.env.NTBA_FIX_350 = '1';
+
+    this.bot = new TelegramBot(botToken, {
+      polling: false
+    });
   }
 
   async onModuleInit() {
@@ -551,12 +558,12 @@ export class BotService implements OnModuleInit {
           initialMessage
         );
       } catch (sendError) {
-        console.error(`[${new Date().toISOString()}] ❌ Failed to send initial message to topic ${newTopicResult.message_thread_id}:`, sendError.message);
-
-        // If topic doesn't exist, clean up the link
+        // If topic doesn't exist, delete the topic and all its relations
         if (sendError.message && sendError.message.includes('message thread not found')) {
-          console.warn(`[${new Date().toISOString()}] 🧹 Cleaning up broken mention topic link: ${newTopicResult.message_thread_id}`);
-          await this.topicsService.removeBrokenLink(messageThreadId, newTopicResult.message_thread_id, chat.id.toString());
+          console.warn(`[${new Date().toISOString()}] 🧹 Topic ${newTopicResult.message_thread_id} not found - deleting from database`);
+          await this.topicsService.deleteTopicAndRelations(newTopicResult.message_thread_id, chat.id.toString());
+        } else {
+          console.error(`[${new Date().toISOString()}] ❌ Failed to send initial message to topic ${newTopicResult.message_thread_id}:`, sendError.message);
         }
 
         // Don't throw - let the mention process continue
@@ -1001,12 +1008,12 @@ export class BotService implements OnModuleInit {
           initialMessage
         );
       } catch (sendError) {
-        console.error(`[${new Date().toISOString()}] ❌ Failed to send initial message to topic ${newTopicResult.message_thread_id}:`, sendError.message);
-
-        // If topic doesn't exist, clean up the link
+        // If topic doesn't exist, delete the topic and all its relations
         if (sendError.message && sendError.message.includes('message thread not found')) {
-          console.warn(`[${new Date().toISOString()}] 🧹 Cleaning up broken mention topic link: ${newTopicResult.message_thread_id}`);
-          await this.topicsService.removeBrokenLink(messageThreadId, newTopicResult.message_thread_id, chat.id.toString());
+          console.warn(`[${new Date().toISOString()}] 🧹 Topic ${newTopicResult.message_thread_id} not found - deleting from database`);
+          await this.topicsService.deleteTopicAndRelations(newTopicResult.message_thread_id, chat.id.toString());
+        } else {
+          console.error(`[${new Date().toISOString()}] ❌ Failed to send initial message to topic ${newTopicResult.message_thread_id}:`, sendError.message);
         }
 
         // Don't throw - let the mention process continue
@@ -1555,13 +1562,12 @@ export class BotService implements OnModuleInit {
           }
 
         } catch (error) {
-          console.error(`[${new Date().toISOString()}] ❌ Error syncing message to topic ${linkedTopic.topicId}:`, error.message);
-
-          // If it's "message thread not found", remove the broken link
+          // If it's "message thread not found", delete the topic and relations
           if (error.message && error.message.includes('message thread not found')) {
-            console.warn(`[${new Date().toISOString()}] 🧹 Cleaning up broken topic link: ${linkedTopic.topicId}`);
-            // TODO: Update removeBrokenLink to handle new data structure
-            // await this.topicsService.removeBrokenLink(messageThreadId, linkedTopic.topicId, chat.id.toString());
+            console.warn(`[${new Date().toISOString()}] 🧹 Topic ${linkedTopic.topicId}@${linkedTopic.groupId} not found - deleting from database`);
+            await this.topicsService.deleteTopicAndRelations(linkedTopic.topicId, linkedTopic.groupId);
+          } else {
+            console.error(`[${new Date().toISOString()}] ❌ Error syncing message to topic ${linkedTopic.topicId}:`, error.message);
           }
         }
       }
@@ -2178,8 +2184,8 @@ export class BotService implements OnModuleInit {
           targetGroupId = targetTopic.groupId;
           console.log(`      ✅ Found target topic in group ${targetGroupId}`);
         } else {
-          console.warn(`      ⚠️ Target topic ${toTopicId} not found - cleaning up broken link`);
-          await this.topicsService.removeBrokenLink(fromTopicId, toTopicId, sourceGroupId);
+          console.warn(`      ⚠️ Target topic ${toTopicId} not found - deleting from database`);
+          await this.topicsService.deleteTopicAndRelations(toTopicId, targetGroupId);
           return;
         }
       }
@@ -2193,12 +2199,12 @@ export class BotService implements OnModuleInit {
         }
       }
     } catch (error) {
-      console.error(`Error syncing attachments from topic ${fromTopicId} to ${toTopicId}:`, error);
-
-      // Check if it's a "message thread not found" error and clean up
+      // Check if it's a "message thread not found" error and delete topic
       if (error.message && error.message.includes('message thread not found')) {
-        console.warn(`[${new Date().toISOString()}] 🧹 Cleaning up broken attachment sync link: ${toTopicId}`);
-        await this.topicsService.removeBrokenLink(fromTopicId, toTopicId, sourceGroupId);
+        console.warn(`[${new Date().toISOString()}] 🧹 Topic ${toTopicId} not found - deleting from database`);
+        await this.topicsService.deleteTopicAndRelations(toTopicId, sourceGroupId);
+      } else {
+        console.error(`Error syncing attachments from topic ${fromTopicId} to ${toTopicId}:`, error);
       }
     }
   }
@@ -2511,12 +2517,12 @@ export class BotService implements OnModuleInit {
           await this.forwardMessageWithAttachments(savedMessage, linkedTopicId, targetGroupId);
 
         } catch (error) {
-          console.error(`      ❌ Error syncing to topic ${linkedTopic.topicId}:`, error.message);
-
-          // Check if it's a "message thread not found" error and clean up
+          // Check if it's a "message thread not found" error and delete topic
           if (error.message && error.message.includes('message thread not found')) {
-            console.warn(`      🧹 Cleaning up broken sync link: ${linkedTopic.topicId}`);
-            await this.topicsService.removeBrokenLink(messageThreadId, linkedTopic.topicId, topic.groupId);
+            console.warn(`      🧹 Topic ${linkedTopic.topicId}@${linkedTopic.groupId} not found - deleting from database`);
+            await this.topicsService.deleteTopicAndRelations(linkedTopic.topicId, linkedTopic.groupId);
+          } else {
+            console.error(`      ❌ Error syncing to topic ${linkedTopic.topicId}:`, error.message);
           }
         }
       }
