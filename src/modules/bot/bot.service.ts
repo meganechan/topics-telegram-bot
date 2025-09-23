@@ -1309,6 +1309,7 @@ export class BotService implements OnModuleInit {
 
   private async handleMessageAttachments(msg: TelegramBot.Message, topic: any, messageId: string): Promise<string[]> {
     const attachmentIds: string[] = [];
+    const processedFileIds: Set<string> = new Set(); // Track processed file_ids to avoid duplicates
 
     try {
       // Handle different types of attachments
@@ -1317,46 +1318,58 @@ export class BotService implements OnModuleInit {
       // Photos
       if (msg.photo && msg.photo.length > 0) {
         const largestPhoto = msg.photo[msg.photo.length - 1]; // Get highest resolution
-        attachmentPromises.push(this.saveAttachmentInfo(largestPhoto, 'photo', msg, topic, messageId));
+        if (!processedFileIds.has(largestPhoto.file_id)) {
+          processedFileIds.add(largestPhoto.file_id);
+          attachmentPromises.push(this.saveAttachmentInfo(largestPhoto, 'photo', msg, topic, messageId));
+        }
       }
 
       // Documents
-      if (msg.document) {
+      if (msg.document && !processedFileIds.has(msg.document.file_id)) {
+        processedFileIds.add(msg.document.file_id);
         attachmentPromises.push(this.saveAttachmentInfo(msg.document, 'document', msg, topic, messageId));
       }
 
       // Video
-      if (msg.video) {
+      if (msg.video && !processedFileIds.has(msg.video.file_id)) {
+        processedFileIds.add(msg.video.file_id);
         attachmentPromises.push(this.saveAttachmentInfo(msg.video, 'video', msg, topic, messageId));
       }
 
       // Audio
-      if (msg.audio) {
+      if (msg.audio && !processedFileIds.has(msg.audio.file_id)) {
+        processedFileIds.add(msg.audio.file_id);
         attachmentPromises.push(this.saveAttachmentInfo(msg.audio, 'audio', msg, topic, messageId));
       }
 
       // Voice
-      if (msg.voice) {
+      if (msg.voice && !processedFileIds.has(msg.voice.file_id)) {
+        processedFileIds.add(msg.voice.file_id);
         attachmentPromises.push(this.saveAttachmentInfo(msg.voice, 'voice', msg, topic, messageId));
       }
 
       // Video note
-      if (msg.video_note) {
+      if (msg.video_note && !processedFileIds.has(msg.video_note.file_id)) {
+        processedFileIds.add(msg.video_note.file_id);
         attachmentPromises.push(this.saveAttachmentInfo(msg.video_note, 'video_note', msg, topic, messageId));
       }
 
       // Sticker
-      if (msg.sticker) {
+      if (msg.sticker && !processedFileIds.has(msg.sticker.file_id)) {
+        processedFileIds.add(msg.sticker.file_id);
         attachmentPromises.push(this.saveAttachmentInfo(msg.sticker, 'sticker', msg, topic, messageId));
       }
 
-      // Animation/GIF
-      if (msg.animation) {
+      // Animation/GIF - Check if this file_id was already processed as document
+      if (msg.animation && !processedFileIds.has(msg.animation.file_id)) {
+        processedFileIds.add(msg.animation.file_id);
         attachmentPromises.push(this.saveAttachmentInfo(msg.animation, 'animation', msg, topic, messageId));
       }
 
       const results = await Promise.all(attachmentPromises);
       attachmentIds.push(...results.filter(id => id !== null) as string[]);
+
+      console.log(`  📎 Processed ${attachmentIds.length} unique attachments (filtered duplicates)`);
 
     } catch (error) {
       console.error('Error handling message attachments:', error);
