@@ -723,7 +723,7 @@ export class BotService implements OnModuleInit {
       });
 
       // สร้าง forum topic
-      const topicName = `🎫 ${ticket.ticketId}: ${title}`;
+      const topicName = title;
       const topicResult = await this.createForumTopic(chat.id.toString(), topicName);
 
       if (topicResult && topicResult.message_thread_id) {
