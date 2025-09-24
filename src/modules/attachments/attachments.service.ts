@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Attachment, AttachmentDocument, AttachmentType } from './schemas/attachment.schema';
@@ -8,6 +8,7 @@ import * as crypto from 'crypto';
 
 @Injectable()
 export class AttachmentsService {
+  private readonly logger = new Logger(AttachmentsService.name);
   private readonly uploadDir = './uploads';
   private readonly maxFileSize = 50 * 1024 * 1024; // 50MB
   private readonly allowedMimeTypes = [
@@ -154,7 +155,7 @@ export class AttachmentsService {
         await attachment.deleteOne();
         deletedCount++;
       } catch (error) {
-        console.error(`Error cleaning up attachment ${attachment._id}:`, error);
+        this.logger.error(`Error cleaning up attachment ${attachment._id}:`, error);
       }
     }
 

@@ -1,10 +1,12 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Topic, TopicDocument } from './schemas/topic.schema';
 
 @Injectable()
 export class TopicsService {
+  private readonly logger = new Logger(TopicsService.name);
+
   constructor(
     @InjectModel(Topic.name) private topicModel: Model<TopicDocument>,
   ) {}
@@ -33,7 +35,7 @@ export class TopicsService {
     groupId: string,
   ): Promise<void> {
     // สำหรับ cross-group support: ต้องหา topic แต่ละตัวใน group ที่ถูกต้อง
-    console.log(`[${new Date().toISOString()}] 🔗 LINKING TOPICS: ${topicId1} ↔ ${topicId2}`);
+    this.logger.log(`[${new Date().toISOString()}] 🔗 LINKING TOPICS: ${topicId1} ↔ ${topicId2}`);
 
     // ค้นหา topic1 ใน group ที่ระบุ
     let topic1 = await this.findByTelegramTopicId(topicId1, groupId);
@@ -52,12 +54,12 @@ export class TopicsService {
     }
 
     if (!topic1 || !topic2) {
-      console.error(`[${new Date().toISOString()}] ❌ Cannot link topics: topic1=${!!topic1}, topic2=${!!topic2}`);
+      this.logger.error(`[${new Date().toISOString()}] ❌ Cannot link topics: topic1=${!!topic1}, topic2=${!!topic2}`);
       return;
     }
 
-    console.log(`  - Topic1: ${topicId1} in group ${topic1.groupId}`);
-    console.log(`  - Topic2: ${topicId2} in group ${topic2.groupId}`);
+    this.logger.log(`  - Topic1: ${topicId1} in group ${topic1.groupId}`);
+    this.logger.log(`  - Topic2: ${topicId2} in group ${topic2.groupId}`);
 
     // อัพเดต topic1 ให้ link ไป topic2 (เก็บทั้ง topicId และ groupId)
     await this.topicModel
@@ -75,7 +77,7 @@ export class TopicsService {
       )
       .exec();
 
-    console.log(`  ✅ Topics linked successfully`);
+    this.logger.log(`  ✅ Topics linked successfully`);
   }
 
   async unlinkTopics(
@@ -84,7 +86,7 @@ export class TopicsService {
     groupId: string,
   ): Promise<void> {
     // สำหรับ cross-group support: ต้องหา topic แต่ละตัวใน group ที่ถูกต้อง
-    console.log(`[${new Date().toISOString()}] 🔗 UNLINKING TOPICS: ${topicId1} ↮ ${topicId2}`);
+    this.logger.log(`[${new Date().toISOString()}] 🔗 UNLINKING TOPICS: ${topicId1} ↮ ${topicId2}`);
 
     // ค้นหา topic1 ใน group ที่ระบุ
     let topic1 = await this.findByTelegramTopicId(topicId1, groupId);
@@ -103,12 +105,12 @@ export class TopicsService {
     }
 
     if (!topic1 || !topic2) {
-      console.error(`[${new Date().toISOString()}] ❌ Cannot unlink topics: topic1=${!!topic1}, topic2=${!!topic2}`);
+      this.logger.error(`[${new Date().toISOString()}] ❌ Cannot unlink topics: topic1=${!!topic1}, topic2=${!!topic2}`);
       return;
     }
 
-    console.log(`  - Topic1: ${topicId1} in group ${topic1.groupId}`);
-    console.log(`  - Topic2: ${topicId2} in group ${topic2.groupId}`);
+    this.logger.log(`  - Topic1: ${topicId1} in group ${topic1.groupId}`);
+    this.logger.log(`  - Topic2: ${topicId2} in group ${topic2.groupId}`);
 
     // ลบ link จาก topic1 ไป topic2 (ใช้ object structure ใหม่)
     await this.topicModel
@@ -126,7 +128,7 @@ export class TopicsService {
       )
       .exec();
 
-    console.log(`  ✅ Topics unlinked successfully`);
+    this.logger.log(`  ✅ Topics unlinked successfully`);
   }
 
   async getLinkedTopics(
@@ -137,16 +139,16 @@ export class TopicsService {
     const topic = await this.findByTelegramTopicId(telegramTopicId, groupId);
 
     if (!topic) {
-      console.log(`  ❌ Topic ${telegramTopicId} not found in group ${groupId}`);
+      this.logger.log(`  ❌ Topic ${telegramTopicId} not found in group ${groupId}`);
       return [];
     }
 
     if (!topic.ticketId) {
-      console.log(`  ⚠️ Topic ${telegramTopicId} has no ticketId - no linked topics available`);
+      this.logger.log(`  ⚠️ Topic ${telegramTopicId} has no ticketId - no linked topics available`);
       return [];
     }
 
-    console.log(`  🎫 Searching for topics with ticketId: ${topic.ticketId}`);
+    this.logger.log(`  🎫 Searching for topics with ticketId: ${topic.ticketId}`);
 
     // ค้นหา topics อื่นที่มี ticketId เดียวกัน
     const relatedTopics = await this.topicModel
@@ -164,7 +166,7 @@ export class TopicsService {
       groupId: relatedTopic.groupId
     }));
 
-    console.log(`  🔍 Found ${linkedTopics.length} topics with same ticketId:`,
+    this.logger.log(`  🔍 Found ${linkedTopics.length} topics with same ticketId:`,
       linkedTopics.map(lt => `${lt.topicId}@${lt.groupId}`).join(', '));
 
     return linkedTopics;
@@ -218,15 +220,15 @@ export class TopicsService {
         )
         .exec();
 
-      console.log(`[${new Date().toISOString()}] 🧹 Removed broken link ${brokenTopicId}@${brokenGroupId} from topic ${sourceTopicId}@${sourceGroupId}`);
+      this.logger.log(`[${new Date().toISOString()}] 🧹 Removed broken link ${brokenTopicId}@${brokenGroupId} from topic ${sourceTopicId}@${sourceGroupId}`);
     } catch (error) {
-      console.error(`[${new Date().toISOString()}] ❌ Error removing broken link:`, error);
+      this.logger.error(`[${new Date().toISOString()}] ❌ Error removing broken link:`, error);
     }
   }
 
   async deleteTopicAndRelations(telegramTopicId: number, groupId: string): Promise<void> {
     try {
-      console.log(`[${new Date().toISOString()}] 🗑️ Deleting topic ${telegramTopicId}@${groupId} and all its relations`);
+      this.logger.log(`[${new Date().toISOString()}] 🗑️ Deleting topic ${telegramTopicId}@${groupId} and all its relations`);
 
       // First find the topic to get its linked topics
       const topic = await this.findByTelegramTopicId(telegramTopicId, groupId);
@@ -242,7 +244,7 @@ export class TopicsService {
       await this.deleteTopic(telegramTopicId, groupId);
 
     } catch (error) {
-      console.error(`[${new Date().toISOString()}] ❌ Error deleting topic and relations:`, error);
+      this.logger.error(`[${new Date().toISOString()}] ❌ Error deleting topic and relations:`, error);
     }
   }
 
@@ -257,21 +259,21 @@ export class TopicsService {
 
   async deleteTopic(telegramTopicId: number, groupId: string): Promise<void> {
     try {
-      console.log(`[${new Date().toISOString()}] 🗑️ Deleting topic ${telegramTopicId} from group ${groupId}`);
+      this.logger.log(`[${new Date().toISOString()}] 🗑️ Deleting topic ${telegramTopicId} from group ${groupId}`);
 
       // ลบ topic จาก database
       const result = await this.topicModel.deleteOne({ telegramTopicId, groupId }).exec();
 
       if (result.deletedCount > 0) {
-        console.log(`[${new Date().toISOString()}] ✅ Successfully deleted topic ${telegramTopicId}`);
+        this.logger.log(`[${new Date().toISOString()}] ✅ Successfully deleted topic ${telegramTopicId}`);
 
         // ลบ references ของ topic นี้จาก linkedTopics ของ topics อื่น
         await this.removeTopicReferences(telegramTopicId);
       } else {
-        console.log(`[${new Date().toISOString()}] ⚠️ Topic ${telegramTopicId} not found in database`);
+        this.logger.log(`[${new Date().toISOString()}] ⚠️ Topic ${telegramTopicId} not found in database`);
       }
     } catch (error) {
-      console.error(`[${new Date().toISOString()}] ❌ Error deleting topic ${telegramTopicId}:`, error);
+      this.logger.error(`[${new Date().toISOString()}] ❌ Error deleting topic ${telegramTopicId}:`, error);
     }
   }
 
@@ -285,9 +287,9 @@ export class TopicsService {
         )
         .exec();
 
-      console.log(`[${new Date().toISOString()}] 🧹 Removed all references to deleted topic ${deletedTopicId}`);
+      this.logger.log(`[${new Date().toISOString()}] 🧹 Removed all references to deleted topic ${deletedTopicId}`);
     } catch (error) {
-      console.error(`[${new Date().toISOString()}] ❌ Error removing topic references:`, error);
+      this.logger.error(`[${new Date().toISOString()}] ❌ Error removing topic references:`, error);
     }
   }
 
@@ -300,9 +302,9 @@ export class TopicsService {
         )
         .exec();
 
-      console.log(`[${new Date().toISOString()}] 📝 Updated topic ${telegramTopicId} active status: ${isActive}`);
+      this.logger.log(`[${new Date().toISOString()}] 📝 Updated topic ${telegramTopicId} active status: ${isActive}`);
     } catch (error) {
-      console.error(`[${new Date().toISOString()}] ❌ Error updating topic status:`, error);
+      this.logger.error(`[${new Date().toISOString()}] ❌ Error updating topic status:`, error);
     }
   }
 }
