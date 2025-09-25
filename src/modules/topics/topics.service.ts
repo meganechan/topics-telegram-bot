@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Topic, TopicDocument } from './schemas/topic.schema';
+import { TicketService } from '../ticket/ticket.service';
 
 @Injectable()
 export class TopicsService {
@@ -9,11 +10,27 @@ export class TopicsService {
 
   constructor(
     @InjectModel(Topic.name) private topicModel: Model<TopicDocument>,
+    private ticketService: TicketService,
   ) {}
 
   async createTopic(topicData: Partial<Topic>): Promise<Topic> {
+    // ตรวจสอบว่า ticketId ต้องมี
+    if (!topicData.ticketId) {
+      throw new Error('ticketId is required for creating topic');
+    }
+
     const topic = new this.topicModel(topicData);
-    return topic.save();
+    const savedTopic = await topic.save();
+
+    // อัปเดต ticket ให้เพิ่ม topic นี้
+    await this.ticketService.addTopicToTicket(topicData.ticketId, {
+      topicId: savedTopic.telegramTopicId,
+      groupId: savedTopic.groupId,
+      name: savedTopic.name,
+      isPrimary: topicData.isPrimary || false
+    });
+
+    return savedTopic;
   }
 
   async findByTelegramTopicId(
@@ -131,59 +148,64 @@ export class TopicsService {
     this.logger.log(`  ✅ Topics unlinked successfully`);
   }
 
+  // เปลี่ยน getLinkedTopics ให้ใช้ ticket เป็นตัวกลาง
   async getLinkedTopics(
     telegramTopicId: number,
     groupId: string,
   ): Promise<Array<{ topicId: number; groupId: string }>> {
-    // ค้นหา topic ใน group ที่ระบุ
-    const topic = await this.findByTelegramTopicId(telegramTopicId, groupId);
-
-    if (!topic) {
-      this.logger.log(`  ❌ Topic ${telegramTopicId} not found in group ${groupId}`);
+    // หา topic ปัจจุบัน
+    const currentTopic = await this.findByTelegramTopicId(telegramTopicId, groupId);
+    
+    if (!currentTopic || !currentTopic.ticketId) {
+      this.logger.log(`  ❌ Topic ${telegramTopicId} not found or has no ticketId`);
       return [];
     }
 
-    if (!topic.ticketId) {
-      this.logger.log(`  ⚠️ Topic ${telegramTopicId} has no ticketId - no linked topics available`);
-      return [];
-    }
+    this.logger.log(`  🎫 Finding linked topics via ticketId: ${currentTopic.ticketId}`);
 
-    this.logger.log(`  🎫 Searching for topics with ticketId: ${topic.ticketId}`);
-
-    // ค้นหา topics อื่นที่มี ticketId เดียวกัน
+    // หา topics อื่นใน ticket เดียวกัน
     const relatedTopics = await this.topicModel
       .find({
-        ticketId: topic.ticketId,
+        ticketId: currentTopic.ticketId,
         $or: [
-          { telegramTopicId: { $ne: telegramTopicId } }, // topic อื่นที่ไม่ใช่ตัวเอง
-          { groupId: { $ne: groupId } } // หรือ topic ในกลุ่มอื่น
-        ]
+          { telegramTopicId: { $ne: telegramTopicId } },
+          { groupId: { $ne: groupId } }
+        ],
+        isActive: true
       })
       .exec();
 
-    const linkedTopics = relatedTopics.map(relatedTopic => ({
-      topicId: relatedTopic.telegramTopicId,
-      groupId: relatedTopic.groupId
+    const linkedTopics = relatedTopics.map(topic => ({
+      topicId: topic.telegramTopicId,
+      groupId: topic.groupId
     }));
 
-    this.logger.log(`  🔍 Found ${linkedTopics.length} topics with same ticketId:`,
+    this.logger.log(`  🔍 Found ${linkedTopics.length} linked topics:`,
       linkedTopics.map(lt => `${lt.topicId}@${lt.groupId}`).join(', '));
 
     return linkedTopics;
   }
 
+  // อัปเดต addParticipant ให้อัปเดตทั้ง topic และ ticket
   async addParticipant(
     telegramTopicId: number,
     groupId: string,
     userId: string,
   ): Promise<Topic> {
-    return this.topicModel
+    const topic = await this.topicModel
       .findOneAndUpdate(
         { telegramTopicId, groupId },
-        { $addToSet: { participants: userId } },
-        { new: true },
+        { }, // ไม่เก็บ participants ใน topic แล้ว
+        { new: true }
       )
       .exec();
+
+    // เพิ่ม participant ใน ticket
+    if (topic && topic.ticketId) {
+      await this.ticketService.addParticipant(topic.ticketId, userId);
+    }
+
+    return topic;
   }
 
   async deactivateTopic(
@@ -230,13 +252,22 @@ export class TopicsService {
     try {
       this.logger.log(`[${new Date().toISOString()}] 🗑️ Deleting topic ${telegramTopicId}@${groupId} and all its relations`);
 
-      // First find the topic to get its linked topics
+      // First find the topic to get its linked topics (ใช้ ticket เป็นตัวกลาง)
       const topic = await this.findByTelegramTopicId(telegramTopicId, groupId);
 
-      if (topic && topic.linkedTopics && topic.linkedTopics.length > 0) {
-        // Remove this topic from all linked topics
-        for (const linkedTopic of topic.linkedTopics) {
-          await this.removeBrokenLink(linkedTopic.topicId, telegramTopicId, groupId, linkedTopic.groupId);
+      if (topic && topic.ticketId) {
+        // หา topics อื่นใน ticket เดียวกันและ deactivate พวกมัน
+        const relatedTopics = await this.topicModel
+          .find({
+            ticketId: topic.ticketId,
+            telegramTopicId: { $ne: telegramTopicId },
+            isActive: true
+          })
+          .exec();
+
+        // ลบ topic นี้ออกจาก ticket
+        if (this.ticketService) {
+          await this.ticketService.removeTopicFromTicket(topic.ticketId, telegramTopicId, groupId);
         }
       }
 
@@ -305,6 +336,46 @@ export class TopicsService {
       this.logger.log(`[${new Date().toISOString()}] 📝 Updated topic ${telegramTopicId} active status: ${isActive}`);
     } catch (error) {
       this.logger.error(`[${new Date().toISOString()}] ❌ Error updating topic status:`, error);
+    }
+  }
+
+  // เพิ่ม method สำหรับเพิ่ม topic ใหม่เข้า ticket ที่มีอยู่
+  async addTopicToExistingTicket(
+    ticketId: string,
+    topicData: {
+      telegramTopicId: number;
+      name: string;
+      groupId: string;
+      createdBy?: string;
+    }
+  ): Promise<Topic> {
+    const topic = await this.createTopic({
+      ...topicData,
+      ticketId,
+      isPrimary: false
+    });
+
+    return topic;
+  }
+
+  // อัปเดตสถิติข้อความของ topic
+  async incrementMessageCount(
+    telegramTopicId: number,
+    groupId: string
+  ): Promise<void> {
+    const topic = await this.topicModel
+      .findOneAndUpdate(
+        { telegramTopicId, groupId },
+        { 
+          $inc: { messageCount: 1 },
+          lastMessageAt: new Date()
+        }
+      )
+      .exec();
+
+    // อัปเดตสถิติใน ticket ด้วย
+    if (topic && topic.ticketId) {
+      await this.ticketService.incrementMessageCount(topic.ticketId);
     }
   }
 }

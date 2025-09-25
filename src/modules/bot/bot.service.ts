@@ -266,6 +266,29 @@ export class BotService implements OnModuleInit {
     }
   }
 
+  async deleteForumTopic(chatId: string, messageThreadId: number) {
+    try {
+      this.logger.log(`[${new Date().toISOString()}] API Call: deleteForumTopic - chatId: ${chatId}, messageThreadId: ${messageThreadId}`);
+      const startTime = Date.now();
+
+      // Use deleteForumTopic API
+      const result = await (this.bot as any)._request('deleteForumTopic', { 
+        form: {
+          chat_id: chatId,
+          message_thread_id: messageThreadId,
+        }
+      });
+
+      const duration = Date.now() - startTime;
+      this.logger.log(`[${new Date().toISOString()}] API Response: deleteForumTopic - Duration: ${duration}ms, Success: ${!!result.ok}`);
+      
+      return result;
+    } catch (error) {
+      this.logger.error(`[${new Date().toISOString()}] API Error: deleteForumTopic -`, error);
+      throw error;
+    }
+  }
+
   async sendMessageToTopic(chatId: string, messageThreadId: number, text: string, options?: any) {
     try {
       const sendOptions: any = {
@@ -325,12 +348,13 @@ export class BotService implements OnModuleInit {
 
   private setupCommands() {
     this.bot.onText(/\/start/, this.handleStart.bind(this));
-    this.bot.onText(/\/create_ticket(.*)/, this.handleCreateTicket.bind(this));
-    this.bot.onText(/\/close_ticket/, this.handleCloseTicket.bind(this));
-    this.bot.onText(/\/mention(.*)/, this.handleMention.bind(this));
-    this.bot.onText(/\/link_topic(.*)/, this.handleLinkTopic.bind(this));
-    this.bot.onText(/\/unlink_topic(.*)/, this.handleUnlinkTopic.bind(this));
-    this.bot.onText(/\/sync_topics/, this.handleSyncTopics.bind(this));
+    this.bot.onText(/\/ct(.*)/, this.handleCreateTicket.bind(this));
+    this.bot.onText(/\/cc/, this.handleCloseTicket.bind(this));
+    this.bot.onText(/\/mt(.*)/, this.handleMention.bind(this));
+    this.bot.onText(/\/lk(.*)/, this.handleLinkTopic.bind(this));
+    this.bot.onText(/\/ul(.*)/, this.handleUnlinkTopic.bind(this));
+    this.bot.onText(/\/st/, this.handleSyncTopics.bind(this));
+    this.bot.onText(/\/archive(.*)/, this.handleArchive.bind(this));
 
     this.bot.on('callback_query', this.handleCallbackQuery.bind(this));
     this.bot.on('my_chat_member', this.handleChatMemberUpdate.bind(this));
@@ -480,9 +504,10 @@ export class BotService implements OnModuleInit {
         return;
       }
 
-      // Check if user is already in topic
-      if (topic.participants.includes(targetUser.telegramId)) {
-        await this.bot.answerCallbackQuery(callbackQuery.id, { text: `ℹ️ ${username} อยู่ใน Topic นี้แล้ว` });
+      // Check if user is already in ticket
+      const topicTicket = topic.ticketId ? await this.ticketService.findByTicketId(topic.ticketId) : null;
+      if (topicTicket && topicTicket.participants.includes(targetUser.telegramId)) {
+        await this.bot.answerCallbackQuery(callbackQuery.id, { text: `ℹ️ ${username} อยู่ใน Ticket นี้แล้ว` });
         return;
       }
 
@@ -491,7 +516,7 @@ export class BotService implements OnModuleInit {
       const targetGroupId = userBGroupId || chat.id.toString(); // fallback ไปกลุ่มปัจจุบันถ้าไม่ได้ pair
 
       // สร้าง topic ใหม่สำหรับ user ที่ถูก mention ในกลุ่มที่เขา pair ไว้
-      const newTopicName = `👤 ${targetUser.firstName || username} - ${ticket.ticketId}`;
+      const newTopicName = `👤 ${targetUser.firstName || username} - ${topicTicket?.ticketId || 'UNKNOWN'}`;
       const newTopicResult = await this.createForumTopic(
         targetGroupId,
         newTopicName,
@@ -508,9 +533,7 @@ export class BotService implements OnModuleInit {
         telegramTopicId: newTopicResult.message_thread_id,
         groupId: targetGroupId, // แก้ไข Critical Bug: ใช้ targetGroupId แทน chat.id
         name: newTopicName,
-        ticketId: ticket.ticketId,
-        participants: [targetUser.telegramId, user.id.toString()],
-        linkedTopics: [{ topicId: messageThreadId, groupId: chat.id.toString() }], // เชื่อมโยงกับ topic เดิม
+        ticketId: topicTicket?.ticketId,
         createdBy: targetUser.telegramId // สร้างโดย user ที่ถูก mention (userB)
       });
 
@@ -523,14 +546,16 @@ export class BotService implements OnModuleInit {
       // เชื่อมโยง topic เดิมกับ topic ใหม่
       await this.topicsService.linkTopics(messageThreadId, newTopicResult.message_thread_id, targetGroupId);
 
-      // เพิ่ม user เป็น participant ใน topic เดิมด้วย
-      await this.topicsService.addParticipant(messageThreadId, chat.id.toString(), targetUser.telegramId);
+      // เพิ่ม user เป็น participant ใน ticket
+      if (topic.ticketId) {
+        await this.ticketService.addParticipant(topic.ticketId, targetUser.telegramId);
+      }
 
       // ส่งข้อความแจ้งใน topic เดิม
       const originalTopicMessage =
         `✅ สร้าง Topic สำหรับ @${username} แล้ว\n` +
-        `🎫 Ticket: ${ticket.ticketId}\n` +
-        `📝 หัวข้อ: ${ticket.title}\n` +
+        `🎫 Ticket: ${topicTicket?.ticketId}\n` +
+        `📝 หัวข้อ: ${topicTicket?.title}\n` +
         `👤 เชิญโดย: ${user.first_name}\n` +
         `🔗 Topic ของ @${username}: "${newTopicName}"\n\n` +
         `💬 ข้อความจะถูก sync ระหว่าง topics อัตโนมัติ`;
@@ -545,8 +570,8 @@ export class BotService implements OnModuleInit {
       // ส่งข้อความแจ้งใน topic ใหม่
       const initialMessage =
         `🎯 **${targetUser.firstName || username}** ได้รับการเชิญเข้าร่วม Ticket\n\n` +
-        `🎫 Ticket: ${ticket.ticketId}\n` +
-        `📝 หัวข้อ: ${ticket.title}\n` +
+        `🎫 Ticket: ${topicTicket?.ticketId}\n` +
+        `📝 หัวข้อ: ${topicTicket?.title}\n` +
         `👤 เชิญโดย: ${user.first_name}\n\n` +
         `💬 นี่คือพื้นที่สนทนาส่วนตัวสำหรับ ${targetUser.firstName || username}\n` +
         `🔗 ข้อความจะถูก sync กับ Topic หลักอัตโนมัติ\n\n` +
@@ -573,7 +598,7 @@ export class BotService implements OnModuleInit {
 
       // ส่งการแจ้งเตือนให้ user ที่ถูก mention (ถ้าเป็นไปได้)
       try {
-        await this.notifyMentionedUser(targetUser, ticket, newTopicResult.message_thread_id, chat.id.toString(), user.first_name);
+        await this.notifyMentionedUser(targetUser, topicTicket, newTopicResult.message_thread_id, chat.id.toString(), user.first_name);
       } catch (error) {
         this.logger.log(`Could not send direct notification to user ${username}:`, error.message);
       }
@@ -606,7 +631,7 @@ export class BotService implements OnModuleInit {
       await this.bot.sendMessage(msg.chat.id,
         '👋 สวัสดี! ฉันเป็น Telegram Ticket Support Bot\n\n' +
           '🎫 เพิ่มฉันเข้ากลุ่มและให้สิทธิ์ Admin เพื่อเริ่มใช้งาน\n' +
-          '📋 ใช้คำสั่ง /create_ticket เพื่อสร้าง ticket ใหม่'
+          '📋 ใช้คำสั่ง /ct เพื่อสร้าง ticket ใหม่'
       );
     } else {
       const user = msg.from;
@@ -629,13 +654,13 @@ export class BotService implements OnModuleInit {
         await this.bot.sendMessage(msg.chat.id,
           `✅ Bot พร้อมใช้งานในกลุ่มนี้แล้ว!\n\n` +
           `👤 ${user.first_name} ได้ถูก pair กับกลุ่มนี้เรียบร้อยแล้ว\n` +
-          `🎫 ใช้ /create_ticket <หัวข้อ> [รายละเอียด] เพื่อสร้าง ticket\n` +
+          `🎫 ใช้ /ct <หัวข้อ> [รายละเอียด] เพื่อสร้าง ticket\n` +
           `🔗 เมื่อมีคนเรียกคุณ topic จะถูกสร้างในกลุ่มนี้`
         );
       } else {
         await this.bot.sendMessage(msg.chat.id,
           '✅ Bot พร้อมใช้งานในกลุ่มนี้แล้ว!\n\n' +
-            '🎫 ใช้ /create_ticket <หัวข้อ> [รายละเอียด] เพื่อสร้าง ticket'
+            '🎫 ใช้ /ct <หัวข้อ> [รายละเอียด] เพื่อสร้าง ticket'
         );
       }
     }
@@ -648,13 +673,13 @@ export class BotService implements OnModuleInit {
     if (args.length === 0) {
       await this.bot.sendMessage(msg.chat.id,
         '❌ กรุณาระบุหัวข้อ ticket\n\n' +
-          '📝 ตัวอย่าง: /create_ticket ปัญหาระบบล็อกอิน ไม่สามารถเข้าใช้งานได้'
+          '📝 ตัวอย่าง: /ct ปัญหาระบบล็อกอิน ไม่สามารถเข้าใช้งานได้'
       );
       return;
     }
 
-    // แยก title และ description อย่างถูกต้อง
-    const titleMatch = text.match(/\/create_ticket\s+(.+)/);
+    // แยก title และ description อย่างถูกต้อง (รองรับทั้ง /ct และ /create_ticket)
+    const titleMatch = text.match(/\/(?:ct|create_ticket)\s+(.+)/);
     if (!titleMatch) {
       await this.bot.sendMessage(msg.chat.id, '❌ กรุณาระบุหัวข้อ ticket');
       return;
@@ -727,27 +752,27 @@ export class BotService implements OnModuleInit {
       const topicResult = await this.createForumTopic(chat.id.toString(), topicName);
 
       if (topicResult && topicResult.message_thread_id) {
-        // อัพเดท ticket ด้วย topic ID
-        await this.ticketService.linkTicketToTopic(ticket.ticketId, topicResult.message_thread_id);
-
-        // สร้าง topic ใน database
+        // สร้าง topic ใน database (ระบบใหม่จะอัปเดต ticket อัตโนมัติ)
         await this.topicsService.createTopic({
           telegramTopicId: topicResult.message_thread_id,
           name: topicName,
-          groupId: chat.id.toString(), // ใช้กลุ่มปัจจุบันสำหรับ createTicket topic
+          groupId: chat.id.toString(),
           ticketId: ticket.ticketId,
-          participants: [user.id.toString()],
+          createdBy: user.id.toString(),
+          isPrimary: true, // topic แรกเป็น primary
         });
+
+        // เพิ่ม participant ใน ticket
+        await this.ticketService.addParticipant(ticket.ticketId, user.id.toString());
 
         // ส่งข้อความต้อนรับใน topic
         const welcomeMessage =
           `📋 Ticket: ${ticket.ticketId}\n` +
           `📝 หัวข้อ: ${ticket.title}\n` +
           `👤 สร้างโดย: ${user.first_name}\n` +
-          `📅 วันที่: ${new Date().toLocaleString('th-TH')}\n` +
           (description ? `\n📖 รายละเอียด: ${description}\n` : '') +
-          `\n⚡ ใช้ /close_ticket เพื่อปิด Ticket` +
-          `\n⚡ ใช้ /mention @username เพื่อเชิญคนอื่นเข้าร่วม`;
+            `\n⚡ ใช้ /cc เพื่อปิด Ticket` +
+          `\n⚡ ใช้ /mt @username เพื่อเชิญคนอื่นเข้าร่วม`;
 
         await this.sendMessageToTopic(
           chat.id.toString(),
@@ -803,7 +828,7 @@ export class BotService implements OnModuleInit {
 
     try {
       // หา ticket จาก topic ID
-      const ticket = await this.ticketService.findByTopicId(messageThreadId);
+      const ticket = await this.ticketService.findByTopicId(messageThreadId, chat.id.toString());
       if (!ticket) {
         await this.bot.sendMessage(msg.chat.id,'❌ ไม่พบ Ticket ที่เชื่อมโยงกับ Topic นี้');
         return;
@@ -895,13 +920,13 @@ export class BotService implements OnModuleInit {
         return;
       }
 
-      const ticket = await this.ticketService.findByTicketId(topic.ticketId);
-      if (!ticket) {
+      const topicTicket = await this.ticketService.findByTicketId(topic.ticketId);
+      if (!topicTicket) {
         await this.bot.sendMessage(msg.chat.id,'❌ ไม่พบข้อมูล Ticket');
         return;
       }
 
-      if (ticket.status === 'closed') {
+      if (topicTicket.status === 'closed') {
         await this.bot.sendMessage(msg.chat.id,'❌ ไม่สามารถเชิญคนเข้า Ticket ที่ปิดแล้ว');
         return;
       }
@@ -923,9 +948,10 @@ export class BotService implements OnModuleInit {
         return;
       }
 
-      // ตรวจสอบว่า user อยู่ใน topic แล้วหรือไม่
-      if (topic.participants.includes(targetUser.telegramId)) {
-        await this.bot.sendMessage(msg.chat.id,`ℹ️ ${targetUsername} อยู่ใน Topic นี้แล้ว`);
+      // ตรวจสอบว่า user อยู่ใน ticket แล้วหรือไม่
+      const currentTicket = topic.ticketId ? await this.ticketService.findByTicketId(topic.ticketId) : null;
+      if (currentTicket && currentTicket.participants.includes(targetUser.telegramId)) {
+        await this.bot.sendMessage(msg.chat.id,`ℹ️ ${targetUsername} อยู่ใน Ticket นี้แล้ว`);
         return;
       }
 
@@ -941,7 +967,7 @@ export class BotService implements OnModuleInit {
       this.logger.log(`  - Username: ${targetUsername}`);
 
       // สร้าง topic ใหม่สำหรับ user ที่ถูก mention ในกลุ่มที่เขา pair ไว้
-      const newTopicName = `👤 ${targetUser.firstName || targetUsername} - ${ticket.ticketId}`;
+      const newTopicName = `👤 ${targetUser.firstName || targetUsername} - ${currentTicket?.ticketId || 'UNKNOWN'}`;
       const newTopicResult = await this.createForumTopic(
         targetGroupId,
         newTopicName,
@@ -958,9 +984,7 @@ export class BotService implements OnModuleInit {
         telegramTopicId: newTopicResult.message_thread_id,
         groupId: targetGroupId, // แก้ไข Critical Bug: ใช้ targetGroupId แทน chat.id
         name: newTopicName,
-        ticketId: ticket.ticketId,
-        participants: [targetUser.telegramId, user.id.toString()],
-        linkedTopics: [{ topicId: messageThreadId, groupId: chat.id.toString() }], // เชื่อมโยงกับ topic เดิม
+        ticketId: topicTicket?.ticketId,
         createdBy: targetUser.telegramId // สร้างโดย user ที่ถูก mention (userB)
       });
 
@@ -973,14 +997,16 @@ export class BotService implements OnModuleInit {
       // เชื่อมโยง topic เดิมกับ topic ใหม่
       await this.topicsService.linkTopics(messageThreadId, newTopicResult.message_thread_id, targetGroupId);
 
-      // เพิ่ม user เป็น participant ใน topic เดิมด้วย
-      await this.topicsService.addParticipant(messageThreadId, chat.id.toString(), targetUser.telegramId);
+      // เพิ่ม user เป็น participant ใน ticket
+      if (topic.ticketId) {
+        await this.ticketService.addParticipant(topic.ticketId, targetUser.telegramId);
+      }
 
       // ส่งข้อความแจ้งใน topic เดิม
       const originalTopicMessage =
         `✅ สร้าง Topic สำหรับ @${targetUsername} แล้ว\n` +
-        `🎫 Ticket: ${ticket.ticketId}\n` +
-        `📝 หัวข้อ: ${ticket.title}\n` +
+        `🎫 Ticket: ${topicTicket?.ticketId}\n` +
+        `📝 หัวข้อ: ${topicTicket?.title}\n` +
         `👤 เชิญโดย: ${user.first_name}\n` +
         `🔗 Topic ของ @${targetUsername}: "${newTopicName}"\n\n` +
         `💬 ข้อความจะถูก sync ระหว่าง topics อัตโนมัติ`;
@@ -995,8 +1021,8 @@ export class BotService implements OnModuleInit {
       // ส่งข้อความแจ้งใน topic ใหม่
       const initialMessage =
         `🎯 **${targetUser.firstName || targetUsername}** ได้รับการเชิญเข้าร่วม Ticket\n\n` +
-        `🎫 Ticket: ${ticket.ticketId}\n` +
-        `📝 หัวข้อ: ${ticket.title}\n` +
+        `🎫 Ticket: ${topicTicket?.ticketId}\n` +
+        `📝 หัวข้อ: ${topicTicket?.title}\n` +
         `👤 เชิญโดย: ${user.first_name}\n\n` +
         `💬 นี่คือพื้นที่สนทนาส่วนตัวสำหรับ ${targetUser.firstName || targetUsername}\n` +
         `🔗 ข้อความจะถูก sync กับ Topic หลักอัตโนมัติ\n\n` +
@@ -1023,7 +1049,7 @@ export class BotService implements OnModuleInit {
 
       // ส่งการแจ้งเตือนให้ user ที่ถูก mention (ถ้าเป็นไปได้)
       try {
-        await this.notifyMentionedUser(targetUser, ticket, newTopicResult.message_thread_id, chat.id.toString(), user.first_name);
+        await this.notifyMentionedUser(targetUser, topicTicket, newTopicResult.message_thread_id, chat.id.toString(), user.first_name);
       } catch (error) {
         this.logger.log(`Could not send direct notification to user ${targetUsername}:`, error.message);
       }
@@ -1077,8 +1103,10 @@ export class BotService implements OnModuleInit {
         return;
       }
 
-      // ค้นหาผู้ใช้ที่สามารถเชิญได้ (ยกเว้นคนที่อยู่ใน topic แล้ว)
-      const availableUsers = await this.usersService.findAllActiveUsers(topic.participants);
+      // ค้นหาผู้ใช้ที่สามารถเชิญได้ (ยกเว้นคนที่อยู่ใน ticket แล้ว)
+      const ticket = topic.ticketId ? await this.ticketService.findByTicketId(topic.ticketId) : null;
+      const participants = ticket?.participants || [];
+      const availableUsers = await this.usersService.findAllActiveUsers(participants);
 
       if (availableUsers.length === 0) {
         await this.bot.sendMessage(msg.chat.id,
@@ -1243,15 +1271,27 @@ export class BotService implements OnModuleInit {
       }
 
       this.logger.log(`  ✅ Processing message in topic: ${topic.name || 'Unnamed'} (${topic.groupId})`);
-      this.logger.log(`  🔗 Topic has ${topic.linkedTopics?.length || 0} linked topics`);
+      
+      // ดึงข้อมูล ticket เพื่อดู participants และ linked topics
+      let ticket = null;
+      if (topic.ticketId) {
+        ticket = await this.ticketService.findByTicketId(topic.ticketId);
+        this.logger.log(`  🎫 Ticket: ${ticket?.ticketId} has ${ticket?.topics?.length || 0} topics`);
+        this.logger.log(`  👥 Ticket has ${ticket?.participants?.length || 0} participants`);
+      }
 
-      // เพิ่ม user เป็น participant ใน topic (ถ้ายังไม่มี) - ใช้ topic.groupId สำหรับ cross-group support
-      if (!topic.participants.includes(user.id.toString())) {
-        await this.topicsService.addParticipant(messageThreadId, topic.groupId, user.id.toString());
+      // เพิ่ม user เป็น participant ใน ticket (ถ้ายังไม่มี)
+      if (ticket && !ticket.participants.includes(user.id.toString())) {
+        await this.ticketService.addParticipant(ticket.ticketId, user.id.toString());
       }
 
       // บันทึกข้อความและ attachments ใน database (Phase 4 - Enhanced)
       await this.processMessageWithMetadata(msg, topic);
+
+      // อัปเดตสถิติข้อความ
+      if (topic.ticketId) {
+        await this.topicsService.incrementMessageCount(messageThreadId, topic.groupId);
+      }
 
       // Sync message to linked topics (Phase 3 feature)
       await this.syncMessageToLinkedTopics(msg, topic);
@@ -1536,7 +1576,7 @@ export class BotService implements OnModuleInit {
         const topicExists = await this.topicsService.findByTelegramTopicId(messageThreadId, chat.id.toString());
         if (topicExists) {
           this.logger.log(`  ✅ Topic found in database but has no linked topics`);
-          this.logger.log(`  📋 Current topic linkedTopics array:`, topicExists.linkedTopics || []);
+          this.logger.log(`  📋 Topic ticketId:`, topicExists.ticketId || 'none');
         } else {
           this.logger.log(`  ❌ Topic not found in database - this could be the issue`);
         }
@@ -2153,15 +2193,18 @@ export class BotService implements OnModuleInit {
         }
       }
 
-      if (!sourceTopic || !sourceTopic.linkedTopics || sourceTopic.linkedTopics.length === 0) {
+      // ใช้ ticket เป็นตัวกลางหา linked topics
+      const linkedTopics = await this.topicsService.getLinkedTopics(fromTopicId, sourceTopic.groupId);
+      
+      if (!sourceTopic || linkedTopics.length === 0) {
         this.logger.log(`  ⚠️ No linked topics found for attachment sync`);
         return;
       }
 
-      this.logger.log(`  - Found ${sourceTopic.linkedTopics.length} linked topics:`,
-        sourceTopic.linkedTopics.map(lt => `${lt.topicId}@${lt.groupId}`).join(', '));
+      this.logger.log(`  - Found ${linkedTopics.length} linked topics:`,
+        linkedTopics.map(lt => `${lt.topicId}@${lt.groupId}`).join(', '));
 
-      for (const linkedTopic of sourceTopic.linkedTopics) {
+      for (const linkedTopic of linkedTopics) {
         await this.syncAttachmentsToTopic(fromTopicId, linkedTopic.topicId, sourceTopic.groupId);
       }
     } catch (error) {
@@ -2426,8 +2469,8 @@ export class BotService implements OnModuleInit {
       // พยายามส่งข้อความส่วนตัวให้ user ที่ถูก mention
       const notificationMessage =
         `🔔 คุณถูก mention ใน Ticket Support!\n\n` +
-        `🎫 Ticket: ${ticket.ticketId}\n` +
-        `📝 หัวข้อ: ${ticket.title}\n` +
+        `🎫 Ticket: ${ticket?.ticketId}\n` +
+        `📝 หัวข้อ: ${ticket?.title}\n` +
         `👤 เชิญโดย: ${inviterName}\n\n` +
         `💬 มี Topic ส่วนตัวรอคุณอยู่ในกลุ่ม\n` +
         `🔗 คลิกไปที่กลุ่มและหา Topic: "👤 ${targetUser.firstName || targetUser.username} - ${ticket.ticketId}"\n\n` +
@@ -2530,6 +2573,120 @@ export class BotService implements OnModuleInit {
 
     } catch (error) {
       this.logger.error('Error syncing specific message attachments:', error);
+    }
+  }
+
+  private async handleArchive(msg: TelegramBot.Message, match: RegExpExecArray) {
+    const message = msg;
+    const text = message?.text || '';
+    const args = text.split(' ').slice(1);
+    const user = msg.from;
+    const chat = msg.chat;
+
+    if (!user || !chat || chat.type === 'private') {
+      await this.bot.sendMessage(msg.chat.id, '❌ คำสั่งนี้ใช้ได้เฉพาะในกลุ่มเท่านั้น');
+      return;
+    }
+
+    // กำหนดค่าเริ่มต้นเป็น 30 วัน
+    let maxAgeDays = 30;
+    
+    if (args.length > 0) {
+      const parsedDays = parseInt(args[0]);
+      if (!isNaN(parsedDays) && parsedDays > 0) {
+        maxAgeDays = parsedDays;
+      } else {
+        await this.bot.sendMessage(msg.chat.id, 
+          '❌ จำนวนวันต้องเป็นตัวเลขบวกเท่านั้น\n\n' +
+          '📝 ตัวอย่าง: /archive 30 (ลบ topics ที่อายุมากกว่า 30 วัน)'
+        );
+        return;
+      }
+    }
+
+    try {
+      await this.bot.sendMessage(msg.chat.id, 
+        `🗂️ **เริ่มกระบวนการ Archive**\n\n` +
+        `📅 กำลังค้นหา topics ที่อายุมากกว่า ${maxAgeDays} วัน...\n` +
+        `⚠️ กรุณารอสักครู่...`
+      );
+
+      // ดึงรายการ topics ทั้งหมดในกลุ่มนี้
+      const topics = await this.topicsService.getTopicsByGroup(chat.id.toString());
+      
+      if (topics.length === 0) {
+        await this.bot.sendMessage(msg.chat.id, '📭 ไม่พบ topics ในกลุ่มนี้');
+        return;
+      }
+
+      const now = new Date();
+      const maxAgeMs = maxAgeDays * 24 * 60 * 60 * 1000; // แปลงวันเป็น milliseconds
+      
+      let archivedCount = 0;
+      let unlinkedCount = 0;
+      let errorCount = 0;
+
+      for (const topic of topics) {
+        try {
+          const topicAge = now.getTime() - topic.createdAt.getTime();
+          
+          if (topicAge > maxAgeMs) {
+            this.logger.log(`🗑️ Archiving topic ${topic.telegramTopicId} (${topic.name}) - Age: ${Math.floor(topicAge / (24 * 60 * 60 * 1000))} days`);
+
+            // 1. Unlink topic ก่อน (ถ้ามี linked topics)
+            const linkedTopics = await this.topicsService.getLinkedTopics(topic.telegramTopicId, topic.groupId);
+            if (linkedTopics.length > 0) {
+              for (const linkedTopic of linkedTopics) {
+                try {
+                  await this.topicsService.unlinkTopics(
+                    topic.telegramTopicId,
+                    linkedTopic.topicId,
+                    topic.groupId
+                  );
+                  unlinkedCount++;
+                } catch (unlinkError) {
+                  this.logger.error(`Error unlinking topic ${topic.telegramTopicId} from ${linkedTopic.topicId}:`, unlinkError);
+                }
+              }
+            }
+
+            // 2. ลบ topic จาก Telegram
+            try {
+              await this.deleteForumTopic(topic.groupId, topic.telegramTopicId);
+            } catch (deleteError) {
+              this.logger.error(`Error deleting topic ${topic.telegramTopicId} from Telegram:`, deleteError);
+              // ถึงแม้จะลบจาก Telegram ไม่ได้ ก็ยังลบจาก database ต่อไป
+            }
+
+            // 3. ลบ topic จาก database
+            await this.topicsService.deleteTopic(topic.telegramTopicId, topic.groupId);
+            archivedCount++;
+
+            // หน่วงเวลาเล็กน้อยเพื่อหลีกเลี่ยง rate limit
+            await new Promise(resolve => setTimeout(resolve, 500));
+
+          }
+        } catch (error) {
+          this.logger.error(`Error processing topic ${topic.telegramTopicId}:`, error);
+          errorCount++;
+        }
+      }
+
+      // ส่งผลลัพธ์
+      const resultMessage = 
+        `✅ **กระบวนการ Archive เสร็จสิ้น**\n\n` +
+        `📊 **สรุปผลลัพธ์:**\n` +
+        `🗑️ ลบ topics: ${archivedCount} รายการ\n` +
+        `🔗 ยกเลิกการเชื่อมโยง: ${unlinkedCount} รายการ\n` +
+        `⚠️ ข้อผิดพลาด: ${errorCount} รายการ\n\n` +
+        `📅 เกณฑ์อายุ: มากกว่า ${maxAgeDays} วัน\n` +
+        `👤 ดำเนินการโดย: ${user.first_name}`;
+
+      await this.bot.sendMessage(msg.chat.id, resultMessage);
+
+    } catch (error) {
+      this.logger.error('Error in handleArchive:', error);
+      await this.bot.sendMessage(msg.chat.id, '❌ เกิดข้อผิดพลาดในการ Archive topics');
     }
   }
 }

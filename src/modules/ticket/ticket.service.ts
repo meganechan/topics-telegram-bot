@@ -16,6 +16,9 @@ export class TicketService {
       ...ticketData,
       ticketId,
       status: TicketStatus.OPEN,
+      totalTopics: 0,
+      totalMessages: 0,
+      lastActivityAt: new Date(),
     });
     return ticket.save();
   }
@@ -24,8 +27,12 @@ export class TicketService {
     return this.ticketModel.findOne({ ticketId }).exec();
   }
 
-  async findByTopicId(topicId: number): Promise<Ticket | null> {
-    return this.ticketModel.findOne({ topicId }).exec();
+  // เปลี่ยนจาก findByTopicId เป็นหาตาม topic ใน topics array
+  async findByTopicId(topicId: number, groupId: string): Promise<Ticket | null> {
+    return this.ticketModel.findOne({
+      'topics.topicId': topicId,
+      'topics.groupId': groupId
+    }).exec();
   }
 
   async updateTicket(
@@ -44,8 +51,79 @@ export class TicketService {
     });
   }
 
-  async linkTicketToTopic(ticketId: string, topicId: number): Promise<Ticket> {
-    return this.updateTicket(ticketId, { topicId });
+  // เปลี่ยนจาก linkTicketToTopic เป็น addTopicToTicket
+  async addTopicToTicket(
+    ticketId: string, 
+    topicData: {
+      topicId: number;
+      groupId: string;
+      name: string;
+      isPrimary?: boolean;
+    }
+  ): Promise<Ticket> {
+    const updateData: any = {
+      $addToSet: { topics: topicData },
+      $inc: { totalTopics: 1 },
+      lastActivityAt: new Date()
+    };
+
+    return this.ticketModel
+      .findOneAndUpdate({ ticketId }, updateData, { new: true })
+      .exec();
+  }
+
+  // ลบ topic ออกจาก ticket
+  async removeTopicFromTicket(
+    ticketId: string,
+    topicId: number,
+    groupId: string
+  ): Promise<Ticket> {
+    return this.ticketModel
+      .findOneAndUpdate(
+        { ticketId },
+        { 
+          $pull: { topics: { topicId, groupId } },
+          $inc: { totalTopics: -1 }
+        },
+        { new: true }
+      )
+      .exec();
+  }
+
+  // เพิ่ม participant ใน ticket
+  async addParticipant(ticketId: string, userId: string): Promise<Ticket> {
+    return this.ticketModel
+      .findOneAndUpdate(
+        { ticketId },
+        { $addToSet: { participants: userId } },
+        { new: true }
+      )
+      .exec();
+  }
+
+  // อัปเดตสถิติข้อความ
+  async incrementMessageCount(ticketId: string): Promise<Ticket> {
+    return this.ticketModel
+      .findOneAndUpdate(
+        { ticketId },
+        { 
+          $inc: { totalMessages: 1 },
+          lastActivityAt: new Date()
+        },
+        { new: true }
+      )
+      .exec();
+  }
+
+  // หา topics ทั้งหมดของ ticket
+  async getTicketTopics(ticketId: string): Promise<Array<{
+    topicId: number;
+    groupId: string;
+    name: string;
+    isPrimary: boolean;
+  }>> {
+    const ticket = await this.findByTicketId(ticketId);
+    return ticket?.topics || [];
   }
 
   private generateTicketId(): string {
@@ -61,6 +139,13 @@ export class TicketService {
   async findOpenTicketsByGroup(groupId: string): Promise<Ticket[]> {
     return this.ticketModel
       .find({ groupId, status: TicketStatus.OPEN })
+      .exec();
+  }
+
+  // หา tickets ที่มี topics ใน group นี้
+  async findTicketsWithTopicsInGroup(groupId: string): Promise<Ticket[]> {
+    return this.ticketModel
+      .find({ 'topics.groupId': groupId })
       .exec();
   }
 }
