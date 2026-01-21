@@ -1,13 +1,16 @@
 # Build stage
 FROM node:20-alpine AS builder
 
+# Force install all dependencies regardless of NODE_ENV
+ENV NODE_ENV=development
+
 WORKDIR /app
 
 # Copy package files
 COPY package*.json ./
 
-# Install dependencies
-RUN npm ci
+# Install ALL dependencies (including devDependencies for build)
+RUN npm ci --include=dev
 
 # Copy source code
 COPY . .
@@ -28,7 +31,8 @@ RUN addgroup -g 1001 -S nodejs && \
 COPY package*.json ./
 
 # Install production dependencies only
-RUN npm ci --only=production && npm cache clean --force
+ENV NODE_ENV=production
+RUN npm ci --omit=dev && npm cache clean --force
 
 # Copy built application
 COPY --from=builder /app/dist ./dist
