@@ -1,8 +1,8 @@
-import { Injectable } from '@nestjs/common';
-import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
-import { Ticket, TicketDocument, TicketStatus } from './schemas/ticket.schema';
-import { v4 as uuidv4 } from 'uuid';
+import { Injectable } from "@nestjs/common";
+import { InjectModel } from "@nestjs/mongoose";
+import { Model } from "mongoose";
+import { Ticket, TicketDocument, TicketStatus } from "./schemas/ticket.schema";
+import { v4 as uuidv4 } from "uuid";
 
 @Injectable()
 export class TicketService {
@@ -28,11 +28,16 @@ export class TicketService {
   }
 
   // เปลี่ยนจาก findByTopicId เป็นหาตาม topic ใน topics array
-  async findByTopicId(topicId: number, groupId: string): Promise<Ticket | null> {
-    return this.ticketModel.findOne({
-      'topics.topicId': topicId,
-      'topics.groupId': groupId
-    }).exec();
+  async findByTopicId(
+    topicId: number,
+    groupId: string,
+  ): Promise<Ticket | null> {
+    return this.ticketModel
+      .findOne({
+        "topics.topicId": topicId,
+        "topics.groupId": groupId,
+      })
+      .exec();
   }
 
   async updateTicket(
@@ -53,18 +58,18 @@ export class TicketService {
 
   // เปลี่ยนจาก linkTicketToTopic เป็น addTopicToTicket
   async addTopicToTicket(
-    ticketId: string, 
+    ticketId: string,
     topicData: {
       topicId: number;
       groupId: string;
       name: string;
       isPrimary?: boolean;
-    }
+    },
   ): Promise<Ticket> {
     const updateData: any = {
       $addToSet: { topics: topicData },
       $inc: { totalTopics: 1 },
-      lastActivityAt: new Date()
+      lastActivityAt: new Date(),
     };
 
     return this.ticketModel
@@ -76,16 +81,16 @@ export class TicketService {
   async removeTopicFromTicket(
     ticketId: string,
     topicId: number,
-    groupId: string
+    groupId: string,
   ): Promise<Ticket> {
     return this.ticketModel
       .findOneAndUpdate(
         { ticketId },
-        { 
+        {
           $pull: { topics: { topicId, groupId } },
-          $inc: { totalTopics: -1 }
+          $inc: { totalTopics: -1 },
         },
-        { new: true }
+        { new: true },
       )
       .exec();
   }
@@ -96,7 +101,7 @@ export class TicketService {
       .findOneAndUpdate(
         { ticketId },
         { $addToSet: { participants: userId } },
-        { new: true }
+        { new: true },
       )
       .exec();
   }
@@ -106,22 +111,24 @@ export class TicketService {
     return this.ticketModel
       .findOneAndUpdate(
         { ticketId },
-        { 
+        {
           $inc: { totalMessages: 1 },
-          lastActivityAt: new Date()
+          lastActivityAt: new Date(),
         },
-        { new: true }
+        { new: true },
       )
       .exec();
   }
 
   // หา topics ทั้งหมดของ ticket
-  async getTicketTopics(ticketId: string): Promise<Array<{
-    topicId: number;
-    groupId: string;
-    name: string;
-    isPrimary: boolean;
-  }>> {
+  async getTicketTopics(ticketId: string): Promise<
+    Array<{
+      topicId: number;
+      groupId: string;
+      name: string;
+      isPrimary: boolean;
+    }>
+  > {
     const ticket = await this.findByTicketId(ticketId);
     return ticket?.topics || [];
   }
@@ -137,15 +144,33 @@ export class TicketService {
   }
 
   async findOpenTicketsByGroup(groupId: string): Promise<Ticket[]> {
-    return this.ticketModel
-      .find({ groupId, status: TicketStatus.OPEN })
-      .exec();
+    return this.ticketModel.find({ groupId, status: TicketStatus.OPEN }).exec();
   }
 
   // หา tickets ที่มี topics ใน group นี้
   async findTicketsWithTopicsInGroup(groupId: string): Promise<Ticket[]> {
+    return this.ticketModel.find({ "topics.groupId": groupId }).exec();
+  }
+
+  async findWithFilters(
+    filter: any,
+    limit: number = 20,
+    offset: number = 0,
+    sortBy: string = "createdAt",
+    sortOrder: "asc" | "desc" = "desc",
+  ): Promise<Ticket[]> {
+    const sort: any = {};
+    sort[sortBy] = sortOrder === "asc" ? 1 : -1;
+
     return this.ticketModel
-      .find({ 'topics.groupId': groupId })
+      .find(filter)
+      .sort(sort)
+      .skip(offset)
+      .limit(limit)
       .exec();
+  }
+
+  async countWithFilters(filter: any): Promise<number> {
+    return this.ticketModel.countDocuments(filter).exec();
   }
 }

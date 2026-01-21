@@ -1,0 +1,40 @@
+# Coolify Docker Compose - App Only (ใช้ MongoDB จาก Coolify)
+# สำหรับ deploy ที่ Coolify ต้องสร้าง MongoDB service แยก แล้วเชื่อม network
+
+version: "3.8"
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    expose:
+      - "3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      # ตั้งค่าใน Coolify Environment Variables:
+      # - MONGODB_URI=mongodb://mongodb:27017/topics-telegram-bot
+      # - TELEGRAM_BOT_TOKEN=xxx
+      # - TELEGRAM_WEBHOOK_URL=https://your-domain.com
+      # - API_KEY_SECRET=xxx
+    volumes:
+      - uploads:/app/uploads
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "--no-verbose",
+          "--tries=1",
+          "--spider",
+          "http://localhost:3000/webhook/telegram",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  uploads:
