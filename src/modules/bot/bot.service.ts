@@ -50,7 +50,12 @@ export class BotService implements OnModuleInit {
 
   async onModuleInit() {
     this.setupCommands();
-    await this.setupWebhook();
+
+    // Setup webhook in background to not block app startup
+    this.setupWebhook().catch((err) => {
+      this.logger.error("Failed to setup webhook:", err.message);
+    });
+
     this.logger.log("Telegram bot started successfully");
 
     // Schedule automatic topic sync every 6 hours
