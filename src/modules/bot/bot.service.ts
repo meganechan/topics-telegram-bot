@@ -463,6 +463,10 @@ export class BotService implements OnModuleInit {
     this.bot.onText(/\/st/, this.handleSyncTopics.bind(this));
     this.bot.onText(/\/archive(.*)/, this.handleArchive.bind(this));
 
+    // Debug commands
+    this.bot.onText(/\/debug_sync/, this.handleDebugSync.bind(this));
+    this.bot.onText(/\/debug_clear/, this.handleDebugClear.bind(this));
+
     this.bot.on("callback_query", this.handleCallbackQuery.bind(this));
     this.bot.on("my_chat_member", this.handleChatMemberUpdate.bind(this));
     this.bot.on("message", this.handleMessage.bind(this));
@@ -3684,6 +3688,77 @@ export class BotService implements OnModuleInit {
         msg.chat.id,
         "❌ เกิดข้อผิดพลาดในการ Archive topics",
       );
+    }
+  }
+
+  // Debug commands
+  private async handleDebugSync(msg: TelegramBot.Message) {
+    const chat = msg.chat;
+    const user = msg.from;
+
+    if (!user || !chat || chat.type === "private") {
+      return;
+    }
+
+    try {
+      await this.bot.sendMessage(msg.chat.id, "🔄 กำลัง sync topics...");
+
+      await this.syncTopicsWithTelegram();
+
+      const topics = await this.topicsService.getTopicsByGroup(
+        chat.id.toString(),
+      );
+
+      await this.bot.sendMessage(
+        msg.chat.id,
+        `✅ Sync เสร็จสิ้น\n📊 พบ ${topics.length} topics ในกลุ่มนี้`,
+      );
+    } catch (error) {
+      this.logger.error("Error in handleDebugSync:", error);
+      await this.bot.sendMessage(msg.chat.id, `❌ Error: ${error.message}`);
+    }
+  }
+
+  private async handleDebugClear(msg: TelegramBot.Message) {
+    const chat = msg.chat;
+    const user = msg.from;
+
+    if (!user || !chat || chat.type === "private") {
+      return;
+    }
+
+    try {
+      await this.bot.sendMessage(msg.chat.id, "🗑️ กำลังลบข้อมูลทั้งหมด...");
+
+      // ลบ topics ทั้งหมดในกลุ่มนี้
+      const topics = await this.topicsService.getTopicsByGroup(
+        chat.id.toString(),
+      );
+      let deletedCount = 0;
+
+      for (const topic of topics) {
+        await this.topicsService.deleteTopicAndRelations(
+          topic.telegramTopicId,
+          chat.id.toString(),
+        );
+        deletedCount++;
+      }
+
+      // ลบ tickets ที่เกี่ยวข้อง
+      const tickets = await this.ticketService.findTicketsByGroup(
+        chat.id.toString(),
+      );
+      for (const ticket of tickets) {
+        await this.ticketService.closeTicket(ticket.ticketId);
+      }
+
+      await this.bot.sendMessage(
+        msg.chat.id,
+        `✅ ลบข้อมูลเสร็จสิ้น\n🗑️ ลบ ${deletedCount} topics\n🗑️ ปิด ${tickets.length} tickets`,
+      );
+    } catch (error) {
+      this.logger.error("Error in handleDebugClear:", error);
+      await this.bot.sendMessage(msg.chat.id, `❌ Error: ${error.message}`);
     }
   }
 }
