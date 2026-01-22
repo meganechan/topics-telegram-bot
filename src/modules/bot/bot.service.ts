@@ -3752,25 +3752,11 @@ export class BotService implements OnModuleInit {
           );
           failedCount++;
         }
-
-        // ลบจาก database
-        await this.topicsService.deleteTopicAndRelations(
-          topic.telegramTopicId,
-          chat.id.toString(),
-        );
-      }
-
-      // ลบ tickets ที่เกี่ยวข้อง
-      const tickets = await this.ticketService.findTicketsByGroup(
-        chat.id.toString(),
-      );
-      for (const ticket of tickets) {
-        await this.ticketService.closeTicket(ticket.ticketId);
       }
 
       await this.bot.sendMessage(
         msg.chat.id,
-        `✅ ลบเสร็จสิ้น\n🗑️ ลบ ${deletedCount} topics${failedCount > 0 ? ` (${failedCount} ลบไม่ได้)` : ""}\n🎫 ปิด ${tickets.length} tickets`,
+        `✅ ลบเสร็จสิ้น\n🗑️ ลบ ${deletedCount} topics${failedCount > 0 ? ` (${failedCount} ลบไม่ได้)` : ""}`,
       );
     } catch (error) {
       this.logger.error("Error in handleDebugClear:", error);
