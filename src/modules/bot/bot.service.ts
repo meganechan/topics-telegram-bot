@@ -984,8 +984,9 @@ export class BotService implements OnModuleInit {
 
       let helpMessage =
         `📋 **คำสั่งสำหรับ Ticket ${ticket.ticketId}:**\n\n` +
-        `👥 /mention @username - เชิญคนเข้าร่วม Ticket\n` +
-        `   ตัวอย่าง: /mention @john\n\n` +
+        `👥 /mention - แสดงรายชื่อผู้ใช้ในระบบ\n` +
+        `   /mention <username> - เชิญคนเข้าร่วม Ticket\n` +
+        `   ตัวอย่าง: /mention john\n\n` +
         `🔗 /link_topic <topic_id> - เชื่อมโยง Topic อื่น\n` +
         `   ตัวอย่าง: /link_topic 123\n\n` +
         `🔓 /unlink_topic - ยกเลิกการเชื่อมโยง Topic\n\n`;
@@ -1128,7 +1129,7 @@ export class BotService implements OnModuleInit {
           `📝 **${ticket.title}**\n` +
           (description ? `${description}\n\n` : "\n") +
           `📋 **คำสั่งที่ใช้ได้:**\n` +
-          `• /mention @user - เชิญคนเข้าร่วม Ticket\n` +
+          `• /mention - เชิญคนเข้าร่วม Ticket\n` +
           `• /link_topic <id> - เชื่อมโยง Topic อื่น\n` +
           `• /close_ticket - ปิด Ticket นี้\n` +
           `• /help - ดูคำสั่งทั้งหมด`;
@@ -1340,14 +1341,21 @@ export class BotService implements OnModuleInit {
       await this.bot.sendMessage(
         msg.chat.id,
         "❌ คำสั่ง /mention ใช้ได้เฉพาะใน Topic ของ Ticket เท่านั้น\n\n" +
-          "💡 วิธีใช้: เปิด Topic ที่ต้องการเชิญคน แล้วพิมพ์ /mention @username",
+          "💡 วิธีใช้:\n" +
+          "• /mention - แสดงรายชื่อผู้ใช้ในระบบ\n" +
+          "• /mention <username> - เชิญคนเข้าร่วม Ticket\n\n" +
+          "ตัวอย่าง: /mention john",
       );
       return;
     }
 
     if (args.length === 0) {
-      // แสดง reply markup ให้เลือกผู้ใช้ หรือ inline reply
-      await this.showMentionOptions(msg, messageThreadId, chat.id.toString());
+      // แสดง user list เลย
+      await this.showUserSelectionMenu(
+        msg,
+        messageThreadId,
+        chat.id.toString(),
+      );
       return;
     }
 
