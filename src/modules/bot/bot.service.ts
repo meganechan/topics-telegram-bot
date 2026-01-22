@@ -3728,35 +3728,38 @@ export class BotService implements OnModuleInit {
     }
 
     try {
-      await this.bot.sendMessage(msg.chat.id, "🗑️ กำลังลบ topics ทั้งหมด...");
-
-      // ลบ topics ทั้งหมดในกลุ่มนี้
-      const topics = await this.topicsService.getTopicsByGroup(
-        chat.id.toString(),
+      await this.bot.sendMessage(
+        msg.chat.id,
+        "🗑️ กำลังลบ topics ทั้งหมด (อาจใช้เวลาสักครู่)...",
       );
-      let deletedCount = 0;
-      let failedCount = 0;
 
-      for (const topic of topics) {
+      let deletedCount = 0;
+      let checkedCount = 0;
+
+      // Brute force: ลอง topic IDs ตั้งแต่ 1-10000
+      // Topic IDs ปกติจะเป็นตัวเลขที่ค่อยๆ เพิ่มขึ้น
+      for (let topicId = 1; topicId <= 10000; topicId++) {
         try {
-          // ลบ topic จริงใน Telegram
-          await this.deleteForumTopic(
-            chat.id.toString(),
-            topic.telegramTopicId,
-          );
+          await this.deleteForumTopic(chat.id.toString(), topicId);
           deletedCount++;
+          this.logger.log(`Deleted topic ${topicId}`);
         } catch (err) {
-          // Topic อาจถูกลบไปแล้วหรือไม่มีสิทธิ์
-          this.logger.warn(
-            `Failed to delete topic ${topic.telegramTopicId}: ${err.message}`,
-          );
-          failedCount++;
+          // Topic ไม่มีอยู่หรือลบไม่ได้ - ข้ามไป
+        }
+        checkedCount++;
+
+        // หยุดถ้าลบไปเยอะแล้ว (ป้องกัน rate limit)
+        if (deletedCount >= 50) break;
+
+        // Rate limit: รอทุกๆ 20 requests
+        if (checkedCount % 20 === 0) {
+          await new Promise((r) => setTimeout(r, 1000));
         }
       }
 
       await this.bot.sendMessage(
         msg.chat.id,
-        `✅ ลบเสร็จสิ้น\n🗑️ ลบ ${deletedCount} topics${failedCount > 0 ? ` (${failedCount} ลบไม่ได้)` : ""}`,
+        `✅ ลบเสร็จสิ้น\n🗑️ ลบ ${deletedCount} topics`,
       );
     } catch (error) {
       this.logger.error("Error in handleDebugClear:", error);
