@@ -5,9 +5,16 @@ import { SwaggerModule, DocumentBuilder } from "@nestjs/swagger";
 import { AppModule } from "./app.module";
 
 async function bootstrap() {
+  const logger = new Logger("Bootstrap");
+
+  // Log MongoDB URI (masked) for debugging
+  const mongoUri =
+    process.env.MONGODB_URI || "mongodb://localhost:27017/topics-telegram-bot";
+  const maskedUri = mongoUri.replace(/:([^@]+)@/, ":***@");
+  logger.log(`MongoDB URI: ${maskedUri}`);
+
   const app = await NestFactory.create(AppModule);
   const configService = app.get(ConfigService);
-  const logger = new Logger("Bootstrap");
 
   app.useGlobalPipes(
     new ValidationPipe({
