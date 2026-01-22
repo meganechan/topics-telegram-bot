@@ -1272,15 +1272,6 @@ export class BotService implements OnModuleInit {
         ticket.ticketId,
       );
 
-      // ปิด forum topic
-      await this.closeForumTopic(chat.id.toString(), messageThreadId);
-
-      // อัพเดท topic status ใน database
-      await this.topicsService.deactivateTopic(
-        messageThreadId,
-        chat.id.toString(),
-      );
-
       // คำนวณระยะเวลาที่ ticket เปิดอยู่
       const createdAt = new Date((ticket as any).createdAt);
       const closedAt = new Date();
@@ -1288,17 +1279,75 @@ export class BotService implements OnModuleInit {
         (closedAt.getTime() - createdAt.getTime()) / (1000 * 60 * 60),
       ); // ชั่วโมง
 
-      // ส่งข้อความแจ้งการปิด
+      // ส่งข้อความแจ้งการปิดก่อนลบ topic
       const closeMessage =
-        `✅ *Ticket ${ticket.ticketId} ได้รับการปิดแล้ว*\n\n` +
+        `✅ Ticket ${ticket.ticketId} ได้รับการปิดแล้ว\n\n` +
         `📅 ปิดเมื่อ: ${closedAt.toLocaleString("th-TH")}\n` +
         `👤 ปิดโดย: ${user.first_name}\n` +
         `⏱️ ระยะเวลาทำงาน: ${duration > 0 ? duration + " ชั่วโมง" : "น้อยกว่า 1 ชั่วโมง"}\n\n` +
-        `🔒 Topic นี้จะไม่รับข้อความใหม่อีกต่อไป`;
+        `🗑️ Topic นี้จะถูกลบใน 5 วินาที...`;
 
-      await this.bot.sendMessage(msg.chat.id, closeMessage, {
-        parse_mode: "Markdown",
-      });
+      await this.bot.sendMessage(msg.chat.id, closeMessage);
+
+      // รอ 5 วินาที ให้ user ได้อ่านข้อความ
+      await new Promise((resolve) => setTimeout(resolve, 5000));
+
+      // ลบ forum topic จาก Telegram
+      try {
+        await this.deleteForumTopic(chat.id.toString(), messageThreadId);
+        this.logger.log(`Topic ${messageThreadId} deleted from Telegram`);
+      } catch (deleteError) {
+        this.logger.error("Error deleting topic from Telegram:", deleteError);
+        // ถ้าลบไม่ได้ ให้ปิดแทน
+        await this.closeForumTopic(chat.id.toString(), messageThreadId);
+      }
+
+      // ลบ topic จาก database
+      await this.topicsService.deleteTopic(messageThreadId, chat.id.toString());
+
+      // หา linked topics ทั้งหมดที่เชื่อมกับ ticket นี้
+      const allTicketTopics = await this.topicsService.findByTicketId(
+        ticket.ticketId,
+      );
+
+      // ลบ linked topics ทั้งหมด (ยกเว้น topic ที่เพิ่งลบไป)
+      for (const linkedTopic of allTicketTopics) {
+        if (linkedTopic.telegramTopicId !== messageThreadId) {
+          try {
+            // ส่งข้อความแจ้งใน linked topic ก่อนลบ
+            await this.sendMessageToTopic(
+              linkedTopic.groupId,
+              linkedTopic.telegramTopicId,
+              `🔒 Ticket ${ticket.ticketId} ถูกปิดแล้ว\n\n` +
+                `👤 ปิดโดย: ${user.first_name}\n` +
+                `🗑️ Topic นี้จะถูกลบใน 5 วินาที...`,
+            );
+
+            await new Promise((resolve) => setTimeout(resolve, 5000));
+
+            // ลบ linked topic จาก Telegram
+            await this.deleteForumTopic(
+              linkedTopic.groupId,
+              linkedTopic.telegramTopicId,
+            );
+
+            // ลบจาก database
+            await this.topicsService.deleteTopic(
+              linkedTopic.telegramTopicId,
+              linkedTopic.groupId,
+            );
+
+            this.logger.log(
+              `Linked topic ${linkedTopic.telegramTopicId} deleted`,
+            );
+          } catch (linkedError) {
+            this.logger.error(
+              `Error deleting linked topic ${linkedTopic.telegramTopicId}:`,
+              linkedError,
+            );
+          }
+        }
+      }
 
       // Trigger webhook for ticket closed
       this.hooksService.trigger(
