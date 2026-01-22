@@ -50,6 +50,7 @@ export class BotService implements OnModuleInit {
 
   async onModuleInit() {
     this.setupCommands();
+    await this.setupBotCommands();
 
     // Setup webhook in background to not block app startup
     this.setupWebhook().catch((err) => {
@@ -450,6 +451,24 @@ export class BotService implements OnModuleInit {
         error,
       );
       return { isAdmin: false, canManageTopics: false };
+    }
+  }
+
+  private async setupBotCommands() {
+    try {
+      await this.bot.setMyCommands([
+        { command: "start", description: "🤖 เริ่มใช้งาน Bot" },
+        { command: "ct", description: "🎫 สร้าง Ticket ใหม่" },
+        { command: "cc", description: "✅ ปิด Ticket" },
+        { command: "mt", description: "👥 เชิญคนเข้าร่วม Ticket" },
+        { command: "lk", description: "🔗 เชื่อมโยง Topic" },
+        { command: "ul", description: "🔓 ยกเลิกการเชื่อมโยง Topic" },
+        { command: "st", description: "🔄 Sync Topics กับ Telegram" },
+        { command: "archive", description: "📦 Archive Ticket" },
+      ]);
+      this.logger.log("Bot commands menu configured successfully");
+    } catch (error) {
+      this.logger.error("Failed to set bot commands:", error);
     }
   }
 
