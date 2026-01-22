@@ -485,6 +485,7 @@ export class BotService implements OnModuleInit {
     // Debug commands
     this.bot.onText(/\/debug_sync/, this.handleDebugSync.bind(this));
     this.bot.onText(/\/debug_clear/, this.handleDebugClear.bind(this));
+    this.bot.onText(/\/test_buttons/, this.handleTestButtons.bind(this));
 
     this.bot.on("callback_query", this.handleCallbackQuery.bind(this));
     this.bot.on("my_chat_member", this.handleChatMemberUpdate.bind(this));
@@ -507,6 +508,8 @@ export class BotService implements OnModuleInit {
       await this.handleUnlinkCallback(callbackQuery, data);
     } else if (data?.startsWith("user_not_found:")) {
       await this.handleUserNotFoundCallback(callbackQuery, data);
+    } else if (data?.startsWith("game:")) {
+      await this.handleGameCallback(callbackQuery, data);
     }
   }
 
@@ -2807,6 +2810,103 @@ export class BotService implements OnModuleInit {
       await this.bot.answerCallbackQuery(callbackQuery.id, {
         text: "❌ เกิดข้อผิดพลาด",
       });
+    }
+  }
+
+  // 🎮 Test Buttons - Demo inline buttons
+  private async handleTestButtons(
+    msg: TelegramBot.Message,
+    match: RegExpExecArray,
+  ) {
+    const chat = msg.chat;
+
+    const inlineKeyboard = {
+      inline_keyboard: [
+        [
+          { text: "🔨 ค้อน", callback_data: "game:rock" },
+          { text: "📄 กระดาษ", callback_data: "game:paper" },
+          { text: "✂️ กรรไกร", callback_data: "game:scissors" },
+        ],
+        [{ text: "❌ ยกเลิก", callback_data: "game:cancel" }],
+      ],
+    };
+
+    await this.bot.sendMessage(
+      chat.id,
+      "🎮 **ทดสอบ Inline Buttons**\n\nเลือกอาวุธของคุณ:",
+      { reply_markup: inlineKeyboard },
+    );
+  }
+
+  private async handleGameCallback(
+    callbackQuery: TelegramBot.CallbackQuery,
+    data: string,
+  ) {
+    const choice = data.replace("game:", "");
+    const choices = ["rock", "paper", "scissors"];
+
+    if (choice === "cancel") {
+      await this.bot.answerCallbackQuery(callbackQuery.id, {
+        text: "❌ ยกเลิกเกม",
+      });
+
+      if (callbackQuery.message) {
+        await this.bot
+          .deleteMessage(
+            callbackQuery.message.chat.id,
+            callbackQuery.message.message_id,
+          )
+          .catch(() => {});
+      }
+      return;
+    }
+
+    // Bot random choice
+    const botChoice = choices[Math.floor(Math.random() * choices.length)];
+
+    const emojiMap = {
+      rock: "🔨",
+      paper: "📄",
+      scissors: "✂️",
+    };
+
+    const nameMap = {
+      rock: "ค้อน",
+      paper: "กระดาษ",
+      scissors: "กรรไกร",
+    };
+
+    // Determine winner
+    let result = "";
+    if (choice === botChoice) {
+      result = "🤝 เสมอ!";
+    } else if (
+      (choice === "rock" && botChoice === "scissors") ||
+      (choice === "paper" && botChoice === "rock") ||
+      (choice === "scissors" && botChoice === "paper")
+    ) {
+      result = "🎉 คุณชนะ!";
+    } else {
+      result = "😢 Bot ชนะ!";
+    }
+
+    const resultMessage =
+      `🎮 **ผลการเล่น**\n\n` +
+      `คุณเลือก: ${emojiMap[choice]} ${nameMap[choice]}\n` +
+      `Bot เลือก: ${emojiMap[botChoice]} ${nameMap[botChoice]}\n\n` +
+      `${result}`;
+
+    await this.bot.answerCallbackQuery(callbackQuery.id, {
+      text: result,
+    });
+
+    if (callbackQuery.message) {
+      await this.bot
+        .editMessageText(resultMessage, {
+          chat_id: callbackQuery.message.chat.id,
+          message_id: callbackQuery.message.message_id,
+        })
+        .catch(() => {});
     }
   }
 
