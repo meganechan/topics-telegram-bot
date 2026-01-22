@@ -24,6 +24,16 @@ export class BotService implements OnModuleInit {
   private readonly logger = new Logger(BotService.name);
   private bot: TelegramBot;
 
+  // Conversation state: userId -> { action, data, timestamp }
+  private conversationStates = new Map<
+    string,
+    {
+      action: string;
+      data?: any;
+      timestamp: number;
+    }
+  >();
+
   constructor(
     private configService: ConfigService,
     private usersService: UsersService,
@@ -1013,21 +1023,37 @@ export class BotService implements OnModuleInit {
     match: RegExpExecArray,
   ) {
     const text = msg.text || "";
+    const user = msg.from;
+    const chat = msg.chat;
+
+    if (!user || !chat || chat.type === "private") {
+      await this.bot.sendMessage(
+        msg.chat.id,
+        "❌ คำสั่ง /create_ticket ใช้ได้เฉพาะในกลุ่มเท่านั้น",
+      );
+      return;
+    }
 
     // แยก title และ description อย่างถูกต้อง (รองรับทั้ง /ct และ /create_ticket)
     const titleMatch = text.match(/\/(?:ct|create_ticket)\s+(.+)/);
 
     if (!titleMatch) {
-      // ไม่มี argument - แสดงวิธีใช้
+      // ไม่มี argument - เข้าสู่ conversation mode
+      const userId = `${chat.id}_${user.id}`;
+      this.conversationStates.set(userId, {
+        action: "create_ticket",
+        data: { chatId: chat.id.toString(), userId: user.id.toString() },
+        timestamp: Date.now(),
+      });
+
       await this.bot.sendMessage(
         msg.chat.id,
-        "📝 **วิธีสร้าง Ticket:**\n\n" +
-          "/create_ticket <ชื่อ Topic> [รายละเอียด]\n\n" +
-          "**ตัวอย่าง:**\n" +
-          "• /create_ticket ปัญหาระบบ\n" +
-          "• /create_ticket แจ้งซ่อม เครื่องปริ้นเตอร์เสีย\n" +
-          "• /create_ticket ขอความช่วยเหลือ ต้องการสอบถามการใช้งาน\n\n" +
-          "💡 **คำย่อ:** /ct ทดสอบ",
+        "📝 กรุณาระบุชื่อ Topic ที่ต้องการสร้าง:\n\n" +
+          "ตัวอย่าง:\n" +
+          "• ปัญหาระบบล็อกอิน\n" +
+          "• แจ้งซ่อมเครื่องปริ้น\n" +
+          "• ขอความช่วยเหลือ\n\n" +
+          "💡 ส่งข้อความถัดไปเป็นชื่อ Topic",
       );
       return;
     }
@@ -1036,17 +1062,6 @@ export class BotService implements OnModuleInit {
     const words = fullText.split(" ");
     const title = words[0];
     const description = words.slice(1).join(" ") || undefined;
-
-    const user = msg.from;
-    const chat = msg.chat;
-
-    if (!user || !chat || chat.type === "private") {
-      await this.bot.sendMessage(
-        msg.chat.id,
-        "❌ คำสั่งนี้ใช้ได้เฉพาะในกลุ่มเท่านั้น",
-      );
-      return;
-    }
 
     try {
       // ตรวจสอบว่าเป็น supergroup และรองรับ topics
@@ -1733,6 +1748,25 @@ export class BotService implements OnModuleInit {
   private async handleMessage(msg: TelegramBot.Message) {
     const message = msg;
     const user = msg.from;
+    const chat = msg.chat;
+
+    // Check conversation state first
+    if (user && chat && msg.text && !msg.text.startsWith("/")) {
+      const userId = `${chat.id}_${user.id}`;
+      const state = this.conversationStates.get(userId);
+
+      if (state) {
+        // Clear old states (older than 5 minutes)
+        if (Date.now() - state.timestamp > 300000) {
+          this.conversationStates.delete(userId);
+        } else {
+          // Handle conversation
+          await this.handleConversation(msg, state);
+          this.conversationStates.delete(userId);
+          return;
+        }
+      }
+    }
 
     // 📥 Log incoming message
     const messageThreadId = (message as any)?.message_thread_id;
@@ -1774,6 +1808,114 @@ export class BotService implements OnModuleInit {
       if (messageThreadId) {
         await this.handleTopicMessage(msg, messageThreadId);
       }
+    }
+  }
+
+  private async handleConversation(
+    msg: TelegramBot.Message,
+    state: { action: string; data?: any; timestamp: number },
+  ) {
+    const user = msg.from;
+    const chat = msg.chat;
+    const text = msg.text;
+
+    if (!user || !chat || !text) return;
+
+    if (state.action === "create_ticket") {
+      // Use text as ticket title
+      await this.createTicketFromConversation(
+        chat.id.toString(),
+        user.id.toString(),
+        text,
+        user,
+      );
+    }
+  }
+
+  private async createTicketFromConversation(
+    chatId: string,
+    userId: string,
+    title: string,
+    user: TelegramBot.User,
+  ) {
+    try {
+      // Check permissions
+      const permissions = await this.checkBotPermissions(chatId);
+
+      if (!permissions.isAdmin || !permissions.canManageTopics) {
+        await this.bot.sendMessage(
+          chatId,
+          "❌ Bot ไม่มีสิทธิ์สร้าง Topic\n\n" +
+            "กรุณาให้ Admin ตั้งค่าสิทธิ์ให้ Bot",
+        );
+        return;
+      }
+
+      // Create ticket
+      const ticket = await this.ticketService.createTicket({
+        title,
+        description: undefined,
+        createdBy: userId,
+        groupId: chatId,
+      });
+
+      // Create topic
+      const topicResult = await this.createForumTopic(chatId, title);
+
+      if (topicResult && topicResult.message_thread_id) {
+        await this.topicsService.createTopic({
+          telegramTopicId: topicResult.message_thread_id,
+          name: title,
+          groupId: chatId,
+          ticketId: ticket.ticketId,
+          createdBy: userId,
+          isPrimary: true,
+        });
+
+        await this.ticketService.addParticipant(ticket.ticketId, userId);
+
+        const welcomeMessage =
+          `📝 **${ticket.title}**\n\n` +
+          `📋 **คำสั่งที่ใช้ได้:**\n` +
+          `• /mention - เชิญคนเข้าร่วม Ticket\n` +
+          `• /link_topic <id> - เชื่อมโยง Topic อื่น\n` +
+          `• /close_ticket - ปิด Ticket นี้\n` +
+          `• /help - ดูคำสั่งทั้งหมด`;
+
+        await this.sendMessageToTopic(
+          chatId,
+          topicResult.message_thread_id,
+          welcomeMessage,
+        );
+
+        await this.bot.sendMessage(chatId, `✅ สร้าง Topic "${title}" แล้ว`);
+
+        // Trigger webhook
+        this.hooksService.trigger(
+          HookEvent.TICKET_CREATED,
+          {
+            ticketId: ticket.ticketId,
+            title: ticket.title,
+            description: ticket.description,
+            status: ticket.status,
+            priority: ticket.priority,
+            groupId: chatId,
+            topicId: topicResult.message_thread_id,
+            createdBy: {
+              id: userId,
+              username: user.username,
+              firstName: user.first_name,
+            },
+          },
+          { groupId: chatId },
+        );
+      }
+    } catch (error) {
+      this.logger.error("Error creating ticket from conversation:", error);
+      await this.bot.sendMessage(
+        chatId,
+        "❌ เกิดข้อผิดพลาดในการสร้าง Ticket กรุณาลองใหม่อีกครั้ง",
+      );
     }
   }
 
