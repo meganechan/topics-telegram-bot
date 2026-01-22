@@ -3728,20 +3728,36 @@ export class BotService implements OnModuleInit {
     }
 
     try {
-      await this.bot.sendMessage(msg.chat.id, "🗑️ กำลังลบข้อมูลทั้งหมด...");
+      await this.bot.sendMessage(msg.chat.id, "🗑️ กำลังลบ topics ทั้งหมด...");
 
       // ลบ topics ทั้งหมดในกลุ่มนี้
       const topics = await this.topicsService.getTopicsByGroup(
         chat.id.toString(),
       );
       let deletedCount = 0;
+      let failedCount = 0;
 
       for (const topic of topics) {
+        try {
+          // ลบ topic จริงใน Telegram
+          await this.deleteForumTopic(
+            chat.id.toString(),
+            topic.telegramTopicId,
+          );
+          deletedCount++;
+        } catch (err) {
+          // Topic อาจถูกลบไปแล้วหรือไม่มีสิทธิ์
+          this.logger.warn(
+            `Failed to delete topic ${topic.telegramTopicId}: ${err.message}`,
+          );
+          failedCount++;
+        }
+
+        // ลบจาก database
         await this.topicsService.deleteTopicAndRelations(
           topic.telegramTopicId,
           chat.id.toString(),
         );
-        deletedCount++;
       }
 
       // ลบ tickets ที่เกี่ยวข้อง
@@ -3754,7 +3770,7 @@ export class BotService implements OnModuleInit {
 
       await this.bot.sendMessage(
         msg.chat.id,
-        `✅ ลบข้อมูลเสร็จสิ้น\n🗑️ ลบ ${deletedCount} topics\n🗑️ ปิด ${tickets.length} tickets`,
+        `✅ ลบเสร็จสิ้น\n🗑️ ลบ ${deletedCount} topics${failedCount > 0 ? ` (${failedCount} ลบไม่ได้)` : ""}\n🎫 ปิด ${tickets.length} tickets`,
       );
     } catch (error) {
       this.logger.error("Error in handleDebugClear:", error);
