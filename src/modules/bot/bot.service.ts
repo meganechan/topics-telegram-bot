@@ -1010,12 +1010,9 @@ export class BotService implements OnModuleInit {
 
         // ส่งข้อความต้อนรับใน topic
         const welcomeMessage =
-          `📋 Ticket: ${ticket.ticketId}\n` +
-          `📝 หัวข้อ: ${ticket.title}\n` +
-          `👤 สร้างโดย: ${user.first_name}\n` +
-          (description ? `\n📖 รายละเอียด: ${description}\n` : "") +
-          `\n⚡ ใช้ /cc เพื่อปิด Ticket` +
-          `\n⚡ ใช้ /mt @username เพื่อเชิญคนอื่นเข้าร่วม`;
+          `📝 ${ticket.title}` +
+          (description ? `\n${description}` : "") +
+          `\n\n/cc ปิด Ticket | /mt @user เชิญคนเข้าร่วม`;
 
         await this.sendMessageToTopic(
           chat.id.toString(),
@@ -1025,12 +1022,7 @@ export class BotService implements OnModuleInit {
 
         await this.bot.sendMessage(
           msg.chat.id,
-          `✅ สร้าง Ticket สำเร็จ!\n\n` +
-            `🎫 Ticket ID: ${ticket.ticketId}\n` +
-            `📝 หัวข้อ: ${ticket.title}\n` +
-            `📋 Topic: ${topicName}\n` +
-            `👤 สร้างโดย: ${user.first_name}\n\n` +
-            `💬 กรุณาไปที่ Topic เพื่อสนทนาเกี่ยวกับ Ticket นี้`,
+          `✅ สร้าง Topic "${topicName}" แล้ว`,
         );
 
         // Trigger webhook for ticket created
