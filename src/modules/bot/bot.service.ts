@@ -1162,33 +1162,23 @@ export class BotService implements OnModuleInit {
         ticket.ticketId,
       );
 
-      // ปิด forum topic
-      await this.closeForumTopic(chat.id.toString(), messageThreadId);
+      // ส่งข้อความแจ้งก่อนลบ topic
+      await this.bot.sendMessage(msg.chat.id, `✅ ปิด Ticket แล้ว`);
+
+      // ลบ forum topic
+      try {
+        await this.deleteForumTopic(chat.id.toString(), messageThreadId);
+      } catch (err) {
+        this.logger.warn(
+          `Failed to delete topic ${messageThreadId}: ${err.message}`,
+        );
+      }
 
       // อัพเดท topic status ใน database
       await this.topicsService.deactivateTopic(
         messageThreadId,
         chat.id.toString(),
       );
-
-      // คำนวณระยะเวลาที่ ticket เปิดอยู่
-      const createdAt = new Date((ticket as any).createdAt);
-      const closedAt = new Date();
-      const duration = Math.round(
-        (closedAt.getTime() - createdAt.getTime()) / (1000 * 60 * 60),
-      ); // ชั่วโมง
-
-      // ส่งข้อความแจ้งการปิด
-      const closeMessage =
-        `✅ *Ticket ${ticket.ticketId} ได้รับการปิดแล้ว*\n\n` +
-        `📅 ปิดเมื่อ: ${closedAt.toLocaleString("th-TH")}\n` +
-        `👤 ปิดโดย: ${user.first_name}\n` +
-        `⏱️ ระยะเวลาทำงาน: ${duration > 0 ? duration + " ชั่วโมง" : "น้อยกว่า 1 ชั่วโมง"}\n\n` +
-        `🔒 Topic นี้จะไม่รับข้อความใหม่อีกต่อไป`;
-
-      await this.bot.sendMessage(msg.chat.id, closeMessage, {
-        parse_mode: "Markdown",
-      });
 
       // Trigger webhook for ticket closed
       this.hooksService.trigger(
@@ -1198,8 +1188,7 @@ export class BotService implements OnModuleInit {
           title: ticket.title,
           status: "closed",
           groupId: chat.id.toString(),
-          closedAt: closedAt.toISOString(),
-          duration: duration,
+          closedAt: new Date().toISOString(),
           closedBy: {
             id: user.id.toString(),
             username: user.username,
