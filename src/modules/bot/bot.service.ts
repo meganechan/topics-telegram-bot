@@ -458,13 +458,15 @@ export class BotService implements OnModuleInit {
     try {
       await this.bot.setMyCommands([
         { command: "start", description: "🤖 เริ่มใช้งาน Bot" },
-        { command: "ct", description: "🎫 สร้าง Ticket ใหม่" },
-        { command: "cc", description: "✅ ปิด Ticket" },
-        { command: "mt", description: "👥 เชิญคนเข้าร่วม Ticket" },
-        { command: "lk", description: "🔗 เชื่อมโยง Topic" },
-        { command: "ul", description: "🔓 ยกเลิกการเชื่อมโยง Topic" },
-        { command: "st", description: "🔄 Sync Topics กับ Telegram" },
+        { command: "create_ticket", description: "🎫 สร้าง Ticket ใหม่" },
+        { command: "close_ticket", description: "✅ ปิด Ticket" },
+        { command: "mention", description: "👥 เชิญคนเข้าร่วม Ticket" },
+        { command: "link_topic", description: "🔗 เชื่อมโยง Topic" },
+        { command: "unlink_topic", description: "🔓 ยกเลิกการเชื่อมโยง Topic" },
+        { command: "sync_topics", description: "🔄 Sync Topics กับ Telegram" },
         { command: "archive", description: "📦 Archive Ticket" },
+        { command: "help", description: "❓ ดูคำสั่งที่ใช้ได้" },
+        { command: "test_buttons", description: "🎮 ทดสอบ Inline Buttons" },
       ]);
       this.logger.log("Bot commands menu configured successfully");
     } catch (error) {
@@ -474,18 +476,34 @@ export class BotService implements OnModuleInit {
 
   private setupCommands() {
     this.bot.onText(/\/start/, this.handleStart.bind(this));
+
+    // Main commands (รองรับทั้งแบบเต็มและแบบย่อ)
+    this.bot.onText(/\/create_ticket(.*)/, this.handleCreateTicket.bind(this));
     this.bot.onText(/\/ct(.*)/, this.handleCreateTicket.bind(this));
+
+    this.bot.onText(/\/close_ticket/, this.handleCloseTicket.bind(this));
     this.bot.onText(/\/cc/, this.handleCloseTicket.bind(this));
+
+    this.bot.onText(/\/mention(.*)/, this.handleMention.bind(this));
     this.bot.onText(/\/mt(.*)/, this.handleMention.bind(this));
+
+    this.bot.onText(/\/link_topic(.*)/, this.handleLinkTopic.bind(this));
     this.bot.onText(/\/lk(.*)/, this.handleLinkTopic.bind(this));
+
+    this.bot.onText(/\/unlink_topic(.*)/, this.handleUnlinkTopic.bind(this));
     this.bot.onText(/\/ul(.*)/, this.handleUnlinkTopic.bind(this));
+
+    this.bot.onText(/\/sync_topics/, this.handleSyncTopics.bind(this));
     this.bot.onText(/\/st/, this.handleSyncTopics.bind(this));
+
     this.bot.onText(/\/archive(.*)/, this.handleArchive.bind(this));
+
+    this.bot.onText(/\/help/, this.handleHelp.bind(this));
+    this.bot.onText(/\/test_buttons/, this.handleTestButtons.bind(this));
 
     // Debug commands
     this.bot.onText(/\/debug_sync/, this.handleDebugSync.bind(this));
     this.bot.onText(/\/debug_clear/, this.handleDebugClear.bind(this));
-    this.bot.onText(/\/test_buttons/, this.handleTestButtons.bind(this));
 
     this.bot.on("callback_query", this.handleCallbackQuery.bind(this));
     this.bot.on("my_chat_member", this.handleChatMemberUpdate.bind(this));
@@ -879,7 +897,8 @@ export class BotService implements OnModuleInit {
         msg.chat.id,
         "👋 สวัสดี! ฉันเป็น Telegram Ticket Support Bot\n\n" +
           "🎫 เพิ่มฉันเข้ากลุ่มและให้สิทธิ์ Admin เพื่อเริ่มใช้งาน\n" +
-          "📋 ใช้คำสั่ง /ct เพื่อสร้าง ticket ใหม่",
+          "📋 ใช้คำสั่ง /create_ticket เพื่อสร้าง ticket ใหม่\n" +
+          "❓ ใช้คำสั่ง /help เพื่อดูคำสั่งทั้งหมด",
       );
     } else {
       const user = msg.from;
@@ -906,16 +925,85 @@ export class BotService implements OnModuleInit {
           msg.chat.id,
           `✅ Bot พร้อมใช้งานในกลุ่มนี้แล้ว!\n\n` +
             `👤 ${user.first_name} ได้ถูก pair กับกลุ่มนี้เรียบร้อยแล้ว\n` +
-            `🎫 ใช้ /ct <หัวข้อ> [รายละเอียด] เพื่อสร้าง ticket\n` +
+            `🎫 ใช้ /create_ticket <หัวข้อ> [รายละเอียด] เพื่อสร้าง ticket\n` +
+            `❓ ใช้ /help เพื่อดูคำสั่งทั้งหมด\n` +
             `🔗 เมื่อมีคนเรียกคุณ topic จะถูกสร้างในกลุ่มนี้`,
         );
       } else {
         await this.bot.sendMessage(
           msg.chat.id,
           "✅ Bot พร้อมใช้งานในกลุ่มนี้แล้ว!\n\n" +
-            "🎫 ใช้ /ct <หัวข้อ> [รายละเอียด] เพื่อสร้าง ticket",
+            "🎫 ใช้ /create_ticket <หัวข้อ> [รายละเอียด] เพื่อสร้าง ticket\n" +
+            "❓ ใช้ /help เพื่อดูคำสั่งทั้งหมด",
         );
       }
+    }
+  }
+
+  private async handleHelp(msg: TelegramBot.Message, match: RegExpExecArray) {
+    const topicId = (msg as any).message_thread_id;
+    const chat = msg.chat;
+
+    // ถ้าไม่ได้อยู่ใน topic - แสดง help ทั่วไป
+    if (!topicId) {
+      await this.bot.sendMessage(
+        msg.chat.id,
+        "📋 **คำสั่งที่ใช้ได้:**\n\n" +
+          "🎫 /create_ticket <หัวข้อ> [รายละเอียด] - สร้าง Ticket ใหม่\n" +
+          "   ตัวอย่าง: /create_ticket ปัญหาระบบ ไม่สามารถล็อกอินได้\n\n" +
+          "🔄 /sync_topics - Sync Topics กับ Telegram\n" +
+          "🎮 /test_buttons - ทดสอบ Inline Buttons\n" +
+          "❓ /help - แสดงความช่วยเหลือนี้\n\n" +
+          "💡 **ย่อได้:** /ct, /st",
+      );
+      return;
+    }
+
+    // ตรวจสอบ topic context
+    try {
+      const topic = await this.topicsService.findByTelegramTopicId(
+        topicId,
+        chat.id.toString(),
+      );
+
+      if (!topic || !topic.ticketId) {
+        // Topic ธรรมดา (ไม่มี ticket)
+        await this.bot.sendMessage(
+          msg.chat.id,
+          "📋 **คำสั่งทั่วไป:**\n\n" +
+            "✅ /close_ticket - ปิด Topic นี้\n" +
+            "🎮 /test_buttons - ทดสอบ Inline Buttons\n" +
+            "❓ /help - แสดงความช่วยเหลือ\n\n" +
+            "💡 **ย่อได้:** /cc",
+        );
+        return;
+      }
+
+      // Topic ที่มี ticket
+      const ticket = await this.ticketService.findByTicketId(topic.ticketId);
+
+      let helpMessage =
+        `📋 **คำสั่งสำหรับ Ticket ${ticket.ticketId}:**\n\n` +
+        `👥 /mention @username - เชิญคนเข้าร่วม Ticket\n` +
+        `   ตัวอย่าง: /mention @john\n\n` +
+        `🔗 /link_topic <topic_id> - เชื่อมโยง Topic อื่น\n` +
+        `   ตัวอย่าง: /link_topic 123\n\n` +
+        `🔓 /unlink_topic - ยกเลิกการเชื่อมโยง Topic\n\n`;
+
+      if (ticket.status !== "closed") {
+        helpMessage += `✅ /close_ticket - ปิด Ticket นี้\n\n`;
+      }
+
+      helpMessage += `❓ /help - แสดงความช่วยเหลือนี้\n\n`;
+      helpMessage += `💡 **ย่อได้:** /mt, /lk, /ul, /cc`;
+
+      await this.bot.sendMessage(msg.chat.id, helpMessage);
+    } catch (error) {
+      this.logger.error("Error handling help command:", error);
+      await this.bot.sendMessage(
+        msg.chat.id,
+        "❌ เกิดข้อผิดพลาดในการแสดงความช่วยเหลือ",
+      );
     }
   }
 
@@ -1036,9 +1124,13 @@ export class BotService implements OnModuleInit {
 
         // ส่งข้อความต้อนรับใน topic
         const welcomeMessage =
-          `📝 ${ticket.title}` +
-          (description ? `\n${description}` : "") +
-          `\n\n/cc ปิด Ticket | /mt @user เชิญคนเข้าร่วม`;
+          `📝 **${ticket.title}**\n` +
+          (description ? `${description}\n\n` : "\n") +
+          `📋 **คำสั่งที่ใช้ได้:**\n` +
+          `• /mention @user - เชิญคนเข้าร่วม Ticket\n` +
+          `• /link_topic <id> - เชื่อมโยง Topic อื่น\n` +
+          `• /close_ticket - ปิด Ticket นี้\n` +
+          `• /help - ดูคำสั่งทั้งหมด`;
 
         await this.sendMessageToTopic(
           chat.id.toString(),
@@ -1108,7 +1200,7 @@ export class BotService implements OnModuleInit {
     if (!user || !chat || chat.type === "private") {
       await this.bot.sendMessage(
         msg.chat.id,
-        "❌ คำสั่งนี้ใช้ได้เฉพาะในกลุ่มเท่านั้น",
+        "❌ คำสั่ง /close_ticket ใช้ได้เฉพาะในกลุ่มเท่านั้น",
       );
       return;
     }
@@ -1118,7 +1210,8 @@ export class BotService implements OnModuleInit {
     if (!messageThreadId) {
       await this.bot.sendMessage(
         msg.chat.id,
-        "❌ คำสั่งนี้ใช้ได้เฉพาะใน Topic ของ Ticket เท่านั้น",
+        "❌ คำสั่ง /close_ticket ใช้ได้เฉพาะใน Topic เท่านั้น\n\n" +
+          "💡 กรุณาเปิด Topic ที่ต้องการปิดแล้วใช้คำสั่งนี้ใหม่",
       );
       return;
     }
@@ -1235,7 +1328,7 @@ export class BotService implements OnModuleInit {
     if (!user || !chat || chat.type === "private") {
       await this.bot.sendMessage(
         msg.chat.id,
-        "❌ คำสั่งนี้ใช้ได้เฉพาะในกลุ่มเท่านั้น",
+        "❌ คำสั่ง /mention ใช้ได้เฉพาะในกลุ่มเท่านั้น",
       );
       return;
     }
@@ -1245,7 +1338,8 @@ export class BotService implements OnModuleInit {
     if (!messageThreadId) {
       await this.bot.sendMessage(
         msg.chat.id,
-        "❌ คำสั่งนี้ใช้ได้เฉพาะใน Topic ของ Ticket เท่านั้น",
+        "❌ คำสั่ง /mention ใช้ได้เฉพาะใน Topic ของ Ticket เท่านั้น\n\n" +
+          "💡 วิธีใช้: เปิด Topic ที่ต้องการเชิญคน แล้วพิมพ์ /mention @username",
       );
       return;
     }
@@ -2253,7 +2347,7 @@ export class BotService implements OnModuleInit {
     if (!user || !chat || chat.type === "private") {
       await this.bot.sendMessage(
         msg.chat.id,
-        "❌ คำสั่งนี้ใช้ได้เฉพาะในกลุ่มเท่านั้น",
+        "❌ คำสั่ง /link_topic ใช้ได้เฉพาะในกลุ่มเท่านั้น",
       );
       return;
     }
@@ -2262,7 +2356,11 @@ export class BotService implements OnModuleInit {
     if (!messageThreadId) {
       await this.bot.sendMessage(
         msg.chat.id,
-        "❌ คำสั่งนี้ใช้ได้เฉพาะใน Topic เท่านั้น",
+        "❌ คำสั่ง /link_topic ใช้ได้เฉพาะใน Topic เท่านั้น\n\n" +
+          "💡 วิธีใช้:\n" +
+          "1. เปิด Topic แรกพิมพ์ /link_topic <topic_id>\n" +
+          "2. เปิด Topic ที่สองพิมพ์ /link_topic <topic_id ของ Topic แรก>\n\n" +
+          "📝 ตัวอย่าง: /link_topic 123",
       );
       return;
     }
@@ -2272,7 +2370,7 @@ export class BotService implements OnModuleInit {
         msg.chat.id,
         "❌ กรุณาระบุ Topic ID ที่ต้องการเชื่อมโยง\n\n" +
           "📝 ตัวอย่าง: /link_topic 123\n" +
-          "💡 ใช้คำสั่งในทั้งสอง Topic ที่ต้องการเชื่อมโยง",
+          "💡 หา Topic ID: ดูที่ URL ของ Topic หรือถาม Admin",
       );
       return;
     }
@@ -2379,7 +2477,7 @@ export class BotService implements OnModuleInit {
     if (!user || !chat || chat.type === "private") {
       await this.bot.sendMessage(
         msg.chat.id,
-        "❌ คำสั่งนี้ใช้ได้เฉพาะในกลุ่มเท่านั้น",
+        "❌ คำสั่ง /unlink_topic ใช้ได้เฉพาะในกลุ่มเท่านั้น",
       );
       return;
     }
@@ -2388,7 +2486,8 @@ export class BotService implements OnModuleInit {
     if (!messageThreadId) {
       await this.bot.sendMessage(
         msg.chat.id,
-        "❌ คำสั่งนี้ใช้ได้เฉพาะใน Topic เท่านั้น",
+        "❌ คำสั่ง /unlink_topic ใช้ได้เฉพาะใน Topic เท่านั้น\n\n" +
+          "💡 วิธีใช้: เปิด Topic ที่ต้องการยกเลิกการเชื่อมโยง แล้วพิมพ์ /unlink_topic",
       );
       return;
     }
