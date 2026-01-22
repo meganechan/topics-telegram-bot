@@ -1306,7 +1306,7 @@ export class BotService implements OnModuleInit {
       await this.topicsService.deleteTopic(messageThreadId, chat.id.toString());
 
       // หา linked topics ทั้งหมดที่เชื่อมกับ ticket นี้
-      const allTicketTopics = await this.topicsService.findByTicketId(
+      const allTicketTopics = await this.topicsService.findAllByTicketId(
         ticket.ticketId,
       );
 
