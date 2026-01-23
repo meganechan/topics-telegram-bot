@@ -820,7 +820,7 @@ export class BotService implements OnModuleInit {
 
       try {
         await this.sendMessageToTopic(
-          chat.id.toString(),
+          targetGroupId,
           newTopicResult.message_thread_id,
           initialMessage,
         );
@@ -835,7 +835,7 @@ export class BotService implements OnModuleInit {
           );
           await this.topicsService.deleteTopicAndRelations(
             newTopicResult.message_thread_id,
-            chat.id.toString(),
+            targetGroupId,
           );
         } else {
           this.logger.error(
@@ -1582,7 +1582,7 @@ export class BotService implements OnModuleInit {
 
       try {
         await this.sendMessageToTopic(
-          chat.id.toString(),
+          targetGroupId,
           newTopicResult.message_thread_id,
           initialMessage,
         );
@@ -1597,7 +1597,7 @@ export class BotService implements OnModuleInit {
           );
           await this.topicsService.deleteTopicAndRelations(
             newTopicResult.message_thread_id,
-            chat.id.toString(),
+            targetGroupId,
           );
         } else {
           this.logger.error(
